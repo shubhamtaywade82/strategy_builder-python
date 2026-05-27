@@ -55,7 +55,7 @@ class SupertrendResult:
     passes_holdout: bool
 
 
-def _score(is_metrics: dict, oos_metrics: Optional[dict]) -> Tuple[float, bool]:
+def _score(is_metrics: dict, oos_metrics: Optional[dict], base_price: float = 1.0) -> Tuple[float, bool]:
     """
     Composite score: profit_factor × win_rate × (1 - max_drawdown).
 
@@ -64,7 +64,7 @@ def _score(is_metrics: dict, oos_metrics: Optional[dict]) -> Tuple[float, bool]:
     """
     pf = is_metrics.get("profit_factor", 0.0)
     wr = is_metrics.get("win_rate", 0.0)
-    dd = min(is_metrics.get("max_drawdown", 1.0), 1.0)
+    dd = min(is_metrics.get("max_drawdown", 0.0) / base_price, 1.0)
     tc = is_metrics.get("trade_count", 0)
 
     base = pf * wr * (1.0 - dd)
@@ -185,6 +185,7 @@ class SupertrendResearcher:
     # ------------------------------------------------------------------
 
     def _grid_search(self, symbol: str, timeframe: str, candles: list) -> None:
+        base_price = float(candles[0].close) if candles and len(candles) > 0 and float(candles[0].close) > 0 else 1.0
         for length, multiplier in itertools.product(self.lengths, self.multipliers):
             strategy_dict = {
                 "name": f"ST_{symbol}_{timeframe}_L{length}_M{multiplier}",
@@ -213,7 +214,7 @@ class SupertrendResearcher:
             except Exception as exc:
                 logger.debug(f"OOS holdout failed {symbol} {timeframe} L{length} M{multiplier}: {exc}")
 
-            score, passes = _score(is_metrics, oos_metrics)
+            score, passes = _score(is_metrics, oos_metrics, base_price)
 
             result = SupertrendResult(
                 symbol=symbol,
@@ -222,7 +223,7 @@ class SupertrendResearcher:
                 multiplier=multiplier,
                 is_profit_factor=round(is_metrics.get("profit_factor", 0.0), 3),
                 is_win_rate=round(is_metrics.get("win_rate", 0.0), 3),
-                is_max_drawdown=round(is_metrics.get("max_drawdown", 0.0), 3),
+                is_max_drawdown=round(is_metrics.get("max_drawdown", 0.0) / base_price, 3),
                 is_trade_count=is_metrics.get("trade_count", 0),
                 oos_expectancy=round((oos_metrics or {}).get("expectancy", 0.0), 4),
                 oos_profit_factor=round((oos_metrics or {}).get("profit_factor", 0.0), 3),
