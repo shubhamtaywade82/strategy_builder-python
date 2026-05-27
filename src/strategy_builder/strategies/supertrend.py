@@ -27,6 +27,9 @@ from ..domain import Candle
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_LENGTHS = [7, 10, 14]
+DEFAULT_MULTIPLIERS = [2.0, 3.0, 3.5, 4.0]
+
 # ---------------------------------------------------------------------------
 # Regime-based multiplier scaling
 # None means "skip trading entirely in this regime"
