@@ -8,17 +8,8 @@ from mtf_research import BinanceUMKlineLoader, build_mtf_features
 def analyze_live(symbol="SOLUSDT"):
     meta = load_meta(symbol)
     
-    print(f"Fetching live data and computing AI features for {symbol}...")
-    loader = BinanceUMKlineLoader()
-    end = int(time.time() * 1000)
-    start = end - 45 * 86_400_000
-    
-    # We must fetch features manually because build_dataset drops the very last row (as it has no future label)
-    frames = {tf: loader.fetch(symbol, tf, start, end) for tf in ["1m", "15m", "1h", "4h", "1d"]}
-    feats = build_mtf_features(frames, base_tf="1m")
-    feats = feats.dropna().reset_index(drop=True)
-    
     # Run the standard build_dataset to get labels for training
+    print(f"Fetching historical data and training models for {symbol}...")
     ds = build_dataset(symbol, days=45, meta=meta)
     feature_cols = select_feature_columns(ds)
     
@@ -33,15 +24,11 @@ def analyze_live(symbol="SOLUSDT"):
     dt_short = DecisionTreeClassifier(max_depth=3, min_samples_leaf=20, random_state=42)
     dt_short.fit(X_train, y_short)
     
-    # Get the VERY LAST row of features (the exact current minute)
-    last_row_features = feats[feature_cols].iloc[-1].to_numpy(float).reshape(1, -1)
-    
-    pred_long = dt_long.predict(last_row_features)[0]
-    pred_short = dt_short.predict(last_row_features)[0]
-    
     print("\n" + "="*50)
     print("🤖 LIVE AI ANALYSIS ENGINE (Continuous Mode)")
     print("="*50)
+    
+    loader = BinanceUMKlineLoader()
     
     while True:
         # 1. Fetch data up to the current minute

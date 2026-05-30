@@ -57,3 +57,5 @@ Thumbs.db
 .project
 .classpath
 .settings/
+/**/**.log
+research_output.log
