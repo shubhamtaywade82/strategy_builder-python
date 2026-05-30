@@ -7,11 +7,11 @@ You provide a symbol, and it:
 1. Fetches historical OHLCV and Open Interest (Rate-limit aware).
 2. Performs institutional session analytics (RVOL, Efficiency).
 3. Detects prevailing Market Regimes.
-4. Backtests a suite of professional strategies.
-5. Reports the best-performing configuration.
+4. Backtests a suite of professional strategies across MULTIPLE timeframe combos.
+5. Reports the best-performing configuration per combo and overall.
 
 Usage:
-python researcher.py --symbol BTCUSDT
+python researcher.py --symbol BTCUSDT --days 30
 """
 
 import argparse
@@ -114,12 +114,18 @@ STRATEGY_LIBRARY = [
     }
 ]
 
+# Timeframe combos to test: (primary_tf, htf_tf, label)
+TIMEFRAME_COMBOS = [
+    ("15m", "1h", "15m/1h"),
+    ("1h", "4h", "1h/4h"),
+]
+
+
 class CryptoFuturesResearcher:
     def __init__(self, symbol: str):
         self.symbol = symbol.upper()
         self.loader = CandleLoader(market_data_source="binance")
         self.engine = BacktestEngine()
-        self.results = []
 
     def run(self, days: int = 30):
         print("\n" + "="*60)
@@ -132,76 +138,95 @@ class CryptoFuturesResearcher:
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days)
 
+        # Fetch all timeframes we might need
+        all_tfs = list(dict.fromkeys([tf for combo in TIMEFRAME_COMBOS for tf in combo[:2]]))
         try:
-            # We fetch 1h (HTF) and 15m (Primary)
-            # CandleLoader has built-in sleep/pagination
             mtf_data = self.loader.fetch_mtf(
                 instrument=self.symbol,
-                timeframes=["1h", "15m"],
+                timeframes=all_tfs,
                 start_from=start_date,
                 to=end_date
             )
-            
-            # Small sleep to respect Binance API weight
-            time.sleep(1.0) 
-            
-            # Fetch Open Interest (Optional confirmation)
+            time.sleep(1.0)
             logger.info("Fetching Open Interest history...")
             oi_data = self.loader.fetch_open_interest(self.symbol, "1h")
-            
         except Exception as e:
             logger.error(f"Data fetch failed: {e}")
             return
 
-        # --- STEP 2: MULTI-STRATEGY EVALUATION ---
-        print("-" * 60)
-        logger.info(f"Beginning Backtest Suite (Evaluating {len(STRATEGY_LIBRARY)} strategies)...")
-        
-        for strat_cfg in STRATEGY_LIBRARY:
-            logger.info(f"Testing: {strat_cfg['name']}...")
+        # --- STEP 2: MULTI-STRATEGY + MULTI-TIMEFRAME EVALUATION ---
+        all_results = []  # list of (combo_label, results_list)
+
+        for primary_tf, htf_tf, combo_label in TIMEFRAME_COMBOS:
+            if primary_tf not in mtf_data or htf_tf not in mtf_data:
+                logger.warning(f"Skipping {combo_label}: data not available")
+                continue
+
+            print("-" * 60)
+            logger.info(f"Evaluating {len(STRATEGY_LIBRARY)} strategies on {combo_label}...")
+            combo_results = []
+
+            for strat_cfg in STRATEGY_LIBRARY:
+                logger.info(f"Testing: {strat_cfg['name']} @ {combo_label}...")
+                cfg = dict(strat_cfg)
+                cfg["timeframes"] = [htf_tf, primary_tf]
+                
+                evaluator = SignalEvaluator.build(cfg, mtf_candles=mtf_data)
+                res = self.engine.run(
+                    strategy=cfg,
+                    candles=mtf_data[primary_tf],
+                    signal_generator=evaluator,
+                    mtf_candles=mtf_data
+                )
+                res["strategy_name"] = cfg["name"]
+                res["combo"] = combo_label
+                combo_results.append(res)
             
-            # Add timeframes to config for evaluator
-            strat_cfg["timeframes"] = ["1h", "15m"]
-            
-            evaluator = SignalEvaluator.build(strat_cfg, mtf_candles=mtf_data)
-            
-            res = self.engine.run(
-                strategy=strat_cfg,
-                candles=mtf_data["15m"],
-                signal_generator=evaluator,
-                mtf_candles=mtf_data
-            )
-            
-            self.results.append(res)
+            all_results.append((combo_label, combo_results))
 
         # --- STEP 3: REPORTING ---
-        self._report()
+        self._report(all_results)
 
-    def _report(self):
+    def _report(self, all_results):
         print("\n" + "="*60)
         print(f"FINAL RESEARCH REPORT: {self.symbol}")
         print("="*60)
-        print(f"{'Strategy Name':<30} | {'Win%':<6} | {'P.Factor':<8} | {'Trades':<6}")
-        print("-" * 60)
-        
-        # Access profit_factor as a key
-        sorted_results = sorted(self.results, key=lambda x: x['metrics'].get('profit_factor', 0.0), reverse=True)
-        
-        for r in sorted_results:
-            m = r['metrics']
-            win_rate = m.get('win_rate', 0.0) * 100
-            profit_factor = m.get('profit_factor', 0.0)
-            trade_count = m.get('trade_count', 0)
-            print(f"{r['strategy_name']:<30} | {win_rate:>5.1f}% | {profit_factor:>8.2f} | {trade_count:>6}")
 
-        if sorted_results:
-            best = sorted_results[0]
-            print("\n" + "*"*60)
-            print(f"RECOMMENDED STRATEGY: {best['strategy_name']}")
-            print(f"Profit Factor: {best['metrics'].get('profit_factor', 0.0):.2f}")
-            print("*"*60)
+        best_overall = None
+        best_pf = -1.0
+
+        for combo_label, results in all_results:
+            print(f"\n--- Timeframe: {combo_label} ---")
+            print(f"{'Strategy Name':<30} | {'Win%':<6} | {'P.Factor':<8} | {'Trades':<6}")
+            print("-" * 60)
+            
+            sorted_results = sorted(
+                results,
+                key=lambda x: x['metrics'].get('profit_factor', 0.0),
+                reverse=True
+            )
+            
+            for r in sorted_results:
+                m = r['metrics']
+                win_rate = m.get('win_rate', 0.0) * 100
+                profit_factor = m.get('profit_factor', 0.0)
+                trade_count = m.get('trade_count', 0)
+                print(f"{r['strategy_name']:<30} | {win_rate:>5.1f}% | {profit_factor:>8.2f} | {trade_count:>6}")
+                
+                if profit_factor > best_pf and trade_count >= 5:
+                    best_pf = profit_factor
+                    best_overall = r
+
+        print("\n" + "*"*60)
+        if best_overall:
+            print(f"BEST OVERALL: {best_overall['strategy_name']} @ {best_overall['combo']}")
+            print(f"Profit Factor: {best_pf:.2f}")
+            print(f"Trades: {best_overall['metrics'].get('trade_count', 0)}")
+            print(f"Win Rate: {best_overall['metrics'].get('win_rate', 0.0)*100:.1f}%")
         else:
-            print("\nNo strategies produced valid trades.")
+            print("No strategies produced valid trades.")
+        print("*"*60)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
