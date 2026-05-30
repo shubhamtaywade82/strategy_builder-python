@@ -92,7 +92,7 @@ def build_dataset(symbol: str, days: int, meta: Dict) -> pd.DataFrame:
     end = int(time.time() * 1000)
     start = end - days * 86_400_000
     frames = {tf: loader.fetch(symbol, tf, start, end)
-              for tf in ["1m", "15m", "1h", "4h", "1d"]}
+              for tf in ["1m", "5m", "1h", "4h", "1d"]}
     _FRAME_CACHE[symbol] = frames["1m"]
     feats = build_mtf_features(frames, base_tf="1m")
     cfg = _config_from_meta(meta)
