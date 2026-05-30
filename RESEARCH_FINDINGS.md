@@ -142,6 +142,47 @@ Optimise **net OOS expectancy** instead. Levers, ranked by expected impact here:
 
 ---
 
-## 7. Liquidity-Sweep entry frontier
+## 7. Full win/RR frontier (both entries, 90d OOS, net of fees)
 
-*(appended when the run completes — O(n²) entry, slower)*
+The decisive finding. Positive-expectancy configs (net, out-of-sample):
+
+| symbol | entry | target | win% | PF | exp(R) | OOS trades |
+|--------|-------|--------|------|-----|--------|-----------|
+| ETH | MTF_Alignment | R=3.0 / trail-atr2 | 42% | 1.74 | +0.44 | 19 |
+| ETH | Liquidity_Sweep | R=2.5 | 41% | 1.55 | +0.14 | **39** (firmest) |
+| ETH | MTF_Alignment | R=2.5 | 42% | 1.42 | +0.23 | 19 |
+| ETH | MTF_Alignment | R=2.0 | 45% | 1.29 | +0.12 | 22 |
+| XRP | MTF_Alignment | R=3.0 / trail | 33% | 1.03 | +0.11 | 21 |
+| XRP | Liquidity_Sweep | R=3.0 | 33% | 1.51(gross) | −0.06 | 40 |
+| SOL | every config | — | — | <1 | negative | — |
+
+**Pattern:** edge = TREND entries with WIDE targets (R 2.5–3.0 / trailing). Win%
+is intentionally LOW (33–45%); profit comes from winners running 2–2.4× the
+loss, catching the 1%+ (often 2%+) move ~40% of the time. Tight targets (R=1.0)
+give >50% win but LOSE net (fees eat small wins). **You cannot have >50% win AND
+≥1:2 net — they are inversely locked.** Only ETH (and marginally XRP) clear net
+positive; SOL is dead everywhere.
+
+**Tradeable candidate:** ETH Liquidity_Sweep_MSS, TP=2.5R, stop at swept wick —
+PF 1.55, +0.14R/trade, 39 OOS trades, net of fees. Modest sample → paper
+forward-test before size. ETH-only.
+
+## 8. ML pipeline verdict (research/run_research.py, 45d)
+
+SOL & ETH, both sides → **FAIL**, but two layers:
+- **Environment:** NOT-VALIDATED — this box can't reach Binance funding/mmr meta
+  → fallback → auto-invalid by design. Not a clean test.
+- **Signal:** RF produced **0 confident entries** per fold; cost ladder all
+  negative. Inconclusive (degenerate), neither confirms nor refutes.
+- **Action required:** run on a network-enabled machine:
+  `cd research && python run_research.py --symbol ETHUSDT --days 90` (all 4 syms,
+  both sides). A clean PASS there = a genuine, leakage-checked +1% edge with the
+  exact feature rules + cost tolerance. Until then the ML claim is unproven.
+
+## 9. Bottom line
+
+The only net-positive, fee-aware, out-of-sample edge found anywhere across all
+methods (15 library strategies, SMC, MTF-alignment, ST2-regime, ML trees) is:
+**ETH, trend entries, wide targets (≥2.5R) — PF ~1.4–1.7, ~40% win.** That is the
+strategy whose entries actually catch 1%+ moves often enough to profit. It is
+ETH-specific, modest-sample, and must be paper-forward-tested before capital.

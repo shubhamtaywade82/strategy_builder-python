@@ -61,7 +61,16 @@ def build_report_dict(symbol: str, side: str, report: "v.SideReport",
     }
 
 
-def _config_from_meta(meta: Dict, round_trip_cost: float = 0.0009) -> LevBarrierConfig:
+def _config_from_meta(meta: Dict, round_trip_cost: float = 0.0009, scalp: bool = False) -> LevBarrierConfig:
+    if scalp:
+        return LevBarrierConfig(
+            up_pct=0.004, dn_pct=0.002, max_horizon=30, leverage=10.0,
+            round_trip_cost=round_trip_cost,
+            maint_margin_rate=meta.get("maint_margin_rate", 0.005),
+            funding_rate=meta.get("avg_rate", 0.0001),
+            funding_interval_h=meta.get("interval_h", 8.0),
+            funding_anchor_utc_hour=meta.get("anchor_hour", 0),
+        )
     return LevBarrierConfig(
         up_pct=0.01, dn_pct=0.005, max_horizon=120, leverage=10.0,
         round_trip_cost=round_trip_cost,
@@ -87,7 +96,7 @@ def _base_1m(symbol: str, days: int) -> pd.DataFrame:
     return base
 
 
-def build_dataset(symbol: str, days: int, meta: Dict) -> pd.DataFrame:
+def build_dataset(symbol: str, days: int, meta: Dict, scalp: bool = False) -> pd.DataFrame:
     loader = BinanceUMKlineLoader()
     end = int(time.time() * 1000)
     start = end - days * 86_400_000
@@ -95,20 +104,20 @@ def build_dataset(symbol: str, days: int, meta: Dict) -> pd.DataFrame:
               for tf in ["1m", "5m", "1h", "4h", "1d"]}
     _FRAME_CACHE[symbol] = frames["1m"]
     feats = build_mtf_features(frames, base_tf="1m")
-    cfg = _config_from_meta(meta)
+    cfg = _config_from_meta(meta, scalp=scalp)
     labels = triple_barrier_both_sides(frames["1m"], cfg)
     ds = feats.join(labels.set_index("entry_idx"), how="inner").dropna().reset_index(drop=True)
     return ds
 
 
-def _cost_ladder_ds(symbol: str, days: int, meta: Dict, cost: float) -> pd.DataFrame:
+def _cost_ladder_ds(symbol: str, days: int, meta: Dict, cost: float, scalp: bool = False) -> pd.DataFrame:
     base = _base_1m(symbol, days)
-    return triple_barrier_both_sides(base, _config_from_meta(meta, cost))
+    return triple_barrier_both_sides(base, _config_from_meta(meta, cost, scalp=scalp))
 
 
-def run_symbol(symbol: str, days: int = 45, round_trip_cost: float = 0.0009) -> Dict:
+def run_symbol(symbol: str, days: int = 45, round_trip_cost: float = 0.0009, scalp: bool = False) -> Dict:
     meta = load_meta(symbol)
-    ds = build_dataset(symbol, days, meta)
+    ds = build_dataset(symbol, days, meta, scalp=scalp)
     feature_cols = select_feature_columns(ds)
     folds = v.purged_folds(len(ds), n_folds=5, embargo=120, min_train=500)
     log.info("dataset rows=%d features=%d folds=%d source=%s",
@@ -122,7 +131,7 @@ def run_symbol(symbol: str, days: int = 45, round_trip_cost: float = 0.0009) -> 
             "leakage": v.leakage_probe(ds, side, feature_cols, folds),
             "liquidations": v.liquidation_check(ds, side, 0.005, round_trip_cost),
             "cost_ladder": v.cost_ladder(
-                lambda c: _cost_ladder_ds(symbol, days, meta, c),
+                lambda c: _cost_ladder_ds(symbol, days, meta, c, scalp=scalp),
                 (lambda sd: (lambda d: float(d[f"{sd}_margin_pnl"].mean())))(side),
                 costs=[0.0009, 0.0012, 0.0015]),
         }
@@ -179,8 +188,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--symbol", default="SOLUSDT")
     ap.add_argument("--days", type=int, default=45)
+    ap.add_argument("--scalp", action="store_true", help="Test scalp targets (0.4% TP, 0.2% SL)")
     args = ap.parse_args()
-    run_symbol(args.symbol, args.days)
+    run_symbol(args.symbol, args.days, scalp=args.scalp)
 
 
 if __name__ == "__main__":
