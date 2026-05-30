@@ -3,6 +3,7 @@ from typing import Dict, List, Any, Optional, Callable
 from .evaluation_context import EvaluationContext
 from ..exceptions import ValidationError
 from ..features.momentum_engine import MomentumEngine
+from ..features.structure_detector import StructureDetector
 
 class ConditionRegistry:
     _registry = {}
@@ -673,6 +674,193 @@ class ConditionRegistry:
                 return True
             return False
 
+        @cls.register('mtf_trend_alignment_entry')
+        def mtf_trend_alignment_entry(ctx):
+            # Macro Trend Alignment (4h, 1h) - Skipping 1d if not enough data
+            tfs_macro = ["4h", "1h"]
+            for tf in tfs_macro:
+                series = ctx._mtf_series_up_to(tf)
+                if not series or len(series) < 10: continue # Skip if not enough history for EMA
+                
+                ema = ctx.mtf_ema(tf, 20) # Faster EMA for alignment
+                if ema is None: continue
+                
+                curr_price = series[-1].close
+                if curr_price < ema: return False
+
+            # Intermediate Momentum Alignment (15m, 5m)
+            tfs_intermediate = ["15m", "5m"]
+            for tf in tfs_intermediate:
+                rsi = ctx.mtf_rsi(tf, 14)
+                if rsi is None: continue
+                if rsi < 45: return False # Slightly more permissive
+
+            # Fine-grain Entry Trigger (1m)
+            if not ctx.current_candle: return False
+            
+            # Simple EMA cross on 1m as trigger
+            ema_fast = ctx.ema(9)
+            if not ema_fast or len(ema_fast) < 2: return False
+            
+            cur = ctx.current_candle.close
+            prev = ctx.previous_candle.close if ctx.previous_candle else cur
+            
+            if cur > ema_fast[-1] and prev <= ema_fast[-1]:
+                ctx.direction = "long"
+                ctx.entry_price = cur
+                ctx.stop_distance = ctx.atr() * 1.5
+                return True
+                
+            return False
+
+        @cls.register('advanced_mtf_trend_alignment')
+        def advanced_mtf_trend_alignment(ctx):
+            # 1. Macro Bias (4h)
+            ema_4h = ctx.mtf_ema("4h", 50)
+            if ema_4h is None: return False
+            
+            series_4h = ctx._mtf_series_up_to("4h")
+            if not series_4h: return False
+            bias_bullish = series_4h[-1].close > ema_4h
+            bias_bearish = series_4h[-1].close < ema_4h
+
+            # 2. Intraday Momentum (1h)
+            rsi_1h = ctx.mtf_rsi("1h", 14)
+            if rsi_1h is None: return False
+            
+            # 3. Micro Trigger (1m/5m)
+            cur = ctx.current_candle
+            if not cur: return False
+            
+            vol_z = ctx.volume_zscore(20)
+            atr_pct = ctx.atr_percent() # Average move in %
+
+            if bias_bullish and rsi_1h > 55 and vol_z > 2.0:
+                # Check for 1m breakout of recent high
+                recent_high = max(c.high for c in ctx.candles[-10:-1])
+                if cur.close > recent_high:
+                    ctx.direction = "long"
+                    ctx.entry_price = cur.close
+                    # Set stop distance so that 2R = 1% minimum
+                    # If 1% target is 2R, then R = 0.5%
+                    ctx.stop_distance = max(cur.close * 0.005, ctx.atr() * 1.5)
+                    return True
+
+            if bias_bearish and rsi_1h < 45 and vol_z > 2.0:
+                recent_low = min(c.low for c in ctx.candles[-10:-1])
+                if cur.close < recent_low:
+                    ctx.direction = "short"
+                    ctx.entry_price = cur.close
+                    ctx.stop_distance = max(cur.close * 0.005, ctx.atr() * 1.5)
+                    return True
+
+            return False
+
+        @cls.register('ignition_momentum_1pct_edge')
+        def ignition_momentum_1pct_edge(ctx):
+            # Look for a volatility contraction followed by an expansion
+            if len(ctx.candles) < 30: return False
+            
+            # Volatility contraction: ATR(20) < ATR(50)
+            atr_20 = ctx.atr(20)
+            atr_50 = ctx.atr(50)
+            if atr_20 >= atr_50: return False
+            
+            # Expansion Trigger: Volume Surge + Price Displacement
+            cur = ctx.current_candle
+            prev = ctx.previous_candle
+            vol_z = ctx.volume_zscore(14)
+            
+            if vol_z > 2.5: # Extreme volume surge
+                move_pct = abs(cur.close - prev.close) / prev.close
+                if move_pct > 0.002: # 0.2% move in a single 1m candle
+                    ctx.direction = "long" if cur.close > prev.close else "short"
+                    ctx.entry_price = cur.close
+                    # We target a 1% move, so we set stop at 0.5% for 1:2 RR
+                    ctx.stop_distance = cur.close * 0.005 
+                    return True
+            
+            return False
+
+        @cls.register('institutional_edge_sweep_mss')
+        def institutional_edge_sweep_mss(ctx):
+            """
+            Institutional Sweep + MSS (Market Structure Shift)
+            1. Sweep of 15m/1h Swing Level.
+            2. Break of 1m/5m Structure in opposite direction.
+            3. High Volume Confirmation.
+            Targets a minimum 1% move with 1:2 RR.
+            """
+            # 1. Macro Bias (1h)
+            ema_1h = ctx.mtf_ema("1h", 50)
+            if ema_1h is None: return False
+            series_1h = ctx._mtf_series_up_to("1h")
+            if not series_1h: return False
+            bias = "long" if series_1h[-1].close > ema_1h else "short"
+
+            # 2. Find 15m Liquidity Level
+            series_15m = ctx._mtf_series_up_to("15m")
+            if len(series_15m) < 25: return False
+            # Find recent swing points on 15m
+            sp_15m = StructureDetector.swing_points(series_15m, lookback=5)
+            if not sp_15m["highs"] or not sp_15m["lows"]: return False
+            
+            last_15m_high = sp_15m["highs"][-1]["price"]
+            last_15m_low = sp_15m["lows"][-1]["price"]
+
+            # 3. Detect Sweep (on 1m timeframe)
+            cur = ctx.current_candle
+            prev = ctx.previous_candle
+            if not cur or not prev: return False
+            
+            sweep_long = False
+            sweep_short = False
+            
+            # Sweep of 15m Low (potential Long)
+            if prev.low < last_15m_low and prev.close > last_15m_low:
+                sweep_long = True
+            
+            # Sweep of 15m High (potential Short)
+            if prev.high > last_15m_high and prev.close < last_15m_high:
+                sweep_short = True
+            
+            if not sweep_long and not sweep_short:
+                # Also check if we are CURRENTLY sweeping and looking for MSS
+                # We'll use a slightly larger window for the sweep check
+                past_5 = ctx.candles[-6:-1]
+                if any(c.low < last_15m_low and c.close > last_15m_low for c in past_5):
+                    sweep_long = True
+                if any(c.high > last_15m_high and c.close < last_15m_high for c in past_5):
+                    sweep_short = True
+
+            if not sweep_long and not sweep_short: return False
+
+            # 4. MSS Trigger (1m)
+            # Find recent 1m swing point to break
+            sp_1m = ctx.swing_points(lookback=3)
+            vol_z = ctx.volume_zscore(20)
+            
+            if sweep_long and bias == "long":
+                if not sp_1m["highs"]: return False
+                last_1m_high = sp_1m["highs"][-1]["price"]
+                if cur.close > last_1m_high and vol_z > 1.5:
+                    ctx.direction = "long"
+                    ctx.entry_price = cur.close
+                    # Targeting 1% move => 0.5% SL for 1:2 RR
+                    ctx.stop_distance = max(cur.close * 0.005, cur.close - prev.low)
+                    return True
+
+            if sweep_short and bias == "short":
+                if not sp_1m["lows"]: return False
+                last_1m_low = sp_1m["lows"][-1]["price"]
+                if cur.close < last_1m_low and vol_z > 1.5:
+                    ctx.direction = "short"
+                    ctx.entry_price = cur.close
+                    ctx.stop_distance = max(cur.close * 0.005, prev.high - cur.close)
+                    return True
+
+            return False
+
         @cls.register('generic_breakout')
         def generic_breakout(ctx):
             sp = ctx.swing_points()
@@ -694,6 +882,159 @@ class ConditionRegistry:
                 ctx.entry_price = cur
                 ctx.stop_distance = ctx.atr() * 1.5
                 return True
+            return False
+
+        @cls.register('advanced_mtf_trend_alignment_entry')
+        def advanced_mtf_trend_alignment_entry(ctx):
+            # 1. Macro Trend Alignment (1d, 4h, 1h)
+            # Use EMA 50 to define trend. All 3 must align.
+            tfs_macro = ["1d", "4h", "1h"]
+            macro_trend = None
+            
+            for tf in tfs_macro:
+                ema = ctx.mtf_ema(tf, 50)
+                series = ctx._mtf_series_up_to(tf)
+                if not series or ema is None: return False
+                curr_price = series[-1].close
+                
+                tf_trend = "long" if curr_price > ema else "short"
+                if macro_trend is None:
+                    macro_trend = tf_trend
+                elif macro_trend != tf_trend:
+                    return False # Trends must align across 1d, 4h, 1h
+
+            # 2. Intermediate Structure Confirmation (15m or 5m)
+            # Wait for a breakout in the direction of the macro trend
+            struct_confirmed = False
+            for tf in ["15m", "5m"]:
+                series = ctx._mtf_series_up_to(tf)
+                if not series or len(series) < 5: continue
+                # Structure shift / breakout: close > highest high of previous 4 candles
+                recent_high = max(c.high for c in series[-5:-1])
+                recent_low = min(c.low for c in series[-5:-1])
+                curr_close = series[-1].close
+                
+                if macro_trend == "long" and curr_close > recent_high:
+                    struct_confirmed = True
+                    break
+                elif macro_trend == "short" and curr_close < recent_low:
+                    struct_confirmed = True
+                    break
+                    
+            if not struct_confirmed:
+                return False
+
+            # 3. Fine-grain Entry Trigger (1m)
+            # Entry on 1m following a candlestick pattern (Engulfing)
+            if not ctx.current_candle or not ctx.previous_candle: return False
+            cur = ctx.current_candle
+            prev = ctx.previous_candle
+            
+            atr = ctx.atr()
+            if atr == 0: return False
+
+            # Bullish Engulfing for Long
+            if macro_trend == "long":
+                if prev.close < prev.open and cur.close > cur.open and cur.close > prev.open and cur.open < prev.close:
+                    ctx.direction = "long"
+                    ctx.entry_price = cur.close
+                    # SL below recent swing low on 1m
+                    recent_1m_low = min(c.low for c in ctx.candles[-5:])
+                    ctx.stop_distance = cur.close - recent_1m_low
+                    if ctx.stop_distance <= 0: ctx.stop_distance = atr * 1.5
+                    return True
+
+            # Bearish Engulfing for Short
+            elif macro_trend == "short":
+                if prev.close > prev.open and cur.close < cur.open and cur.close < prev.open and cur.open > prev.close:
+                    ctx.direction = "short"
+                    ctx.entry_price = cur.close
+                    # SL above recent swing high on 1m
+                    recent_1m_high = max(c.high for c in ctx.candles[-5:])
+                    ctx.stop_distance = recent_1m_high - cur.close
+                    if ctx.stop_distance <= 0: ctx.stop_distance = atr * 1.5
+                    return True
+
+            return False
+
+        @cls.register('ignition_momentum_continuation_entry')
+        def ignition_momentum_continuation_entry(ctx):
+            """
+            3-Bar Play / Ignition Momentum Continuation
+            Identifies a massive institutional momentum candle, a brief resting candle,
+            and enters on the continuation breakout. Designed to capture explosive 1%+ moves.
+            """
+            if len(ctx.candles) < 25: return False
+            
+            ign = ctx.candles[-3]
+            rest = ctx.candles[-2]
+            cur = ctx.candles[-1]
+            
+            closes = [c.close for c in ctx.candles[-23:-3]]
+            if len(closes) < 20: return False
+            vols = [c.volume for c in ctx.candles[-23:-3]]
+            vol_sma = sum(vols) / len(vols)
+            
+            # Simplified ATR over last 14 periods before ignition
+            tr_list = []
+            for i in range(len(ctx.candles)-17, len(ctx.candles)-3):
+                c = ctx.candles[i]
+                p = ctx.candles[i-1]
+                tr = max(c.high - c.low, abs(c.high - p.close), abs(c.low - p.close))
+                tr_list.append(tr)
+            atr = sum(tr_list) / len(tr_list) if tr_list else 0.0
+            if atr == 0: return False
+
+            ign_range = ign.high - ign.low
+            rest_range = rest.high - rest.low
+
+            # LONG SETUP
+            is_bull_ignition = (
+                ign_range > 1.5 * atr and 
+                ign.close > ign.open and 
+                (ign.close - ign.low) > (ign_range * 0.7) and 
+                ign.volume > 1.5 * vol_sma
+            )
+            
+            is_bull_rest = (
+                rest_range < ign_range * 0.6 and 
+                rest.low > ign.low + (ign_range * 0.3) and # Stays in upper part
+                rest.volume < ign.volume
+            )
+            
+            if is_bull_ignition and is_bull_rest:
+                if cur.close > rest.high:
+                    ctx.direction = "long"
+                    ctx.entry_price = cur.close
+                    # Set minimum stop distance to 0.75% so 1.5R target = >1.1% move
+                    min_stop = cur.close * 0.0075 
+                    structural_stop = cur.close - rest.low
+                    ctx.stop_distance = max(structural_stop, min_stop)
+                    return True
+
+            # SHORT SETUP
+            is_bear_ignition = (
+                ign_range > 1.5 * atr and 
+                ign.close < ign.open and 
+                (ign.high - ign.close) > (ign_range * 0.7) and 
+                ign.volume > 1.5 * vol_sma
+            )
+            
+            is_bear_rest = (
+                rest_range < ign_range * 0.6 and 
+                rest.high < ign.high - (ign_range * 0.3) and # Stays in lower part
+                rest.volume < ign.volume
+            )
+            
+            if is_bear_ignition and is_bear_rest:
+                if cur.close < rest.low:
+                    ctx.direction = "short"
+                    ctx.entry_price = cur.close
+                    min_stop = cur.close * 0.0075
+                    structural_stop = rest.high - cur.close
+                    ctx.stop_distance = max(structural_stop, min_stop)
+                    return True
+                    
             return False
 
 # Load defaults when the module is imported

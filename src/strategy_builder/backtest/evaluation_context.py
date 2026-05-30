@@ -170,3 +170,26 @@ class EvaluationContext:
         if candle is None:
             return 0
         return candle.get_timestamp_int()
+
+    def mtf_rsi(self, timeframe: str, period: int = 14) -> Optional[float]:
+        key = f"mtf_rsi_{timeframe}_{period}"
+        if key not in self._memo:
+            series = self._mtf_series_up_to(timeframe)
+            if not series:
+                return None
+            vals = MomentumEngine.rsi(series, period=period)
+            compact = [v for v in vals if v is not None]
+            self._memo[key] = compact[-1] if compact else None
+        return self._memo[key]
+
+    def mtf_ema(self, timeframe: str, period: int = 20) -> Optional[float]:
+        key = f"mtf_ema_{timeframe}_{period}"
+        if key not in self._memo:
+            series = self._mtf_series_up_to(timeframe)
+            if not series:
+                return None
+            closes = [c.close for c in series]
+            vals = MomentumEngine.ema(closes, period=period)
+            compact = [v for v in vals if v is not None]
+            self._memo[key] = compact[-1] if compact else None
+        return self._memo[key]
