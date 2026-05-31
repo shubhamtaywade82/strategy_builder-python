@@ -1,12 +1,12 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import './App.css';
 import {
   Activity, Target, Shield, Zap, Brain,
   ChevronRight, Download, Play, BarChart,
   PieChart, MessageSquare, Clock, Search,
-  Sparkles, X, Gamepad2, Calculator,
+  Sparkles, X, Gamepad2, Calculator, AlertCircle,
 } from 'lucide-react';
-import { type RRRatio, RR_CONFIGS } from './types';
+import { type RRRatio, type ResearchResult, RR_CONFIGS } from './types';
 import Header from './sections/Header';
 import ConfigPanel from './sections/ConfigPanel';
 import ResultsOverview from './sections/ResultsOverview';
@@ -18,7 +18,7 @@ import AIChat from './sections/AIChat';
 import AIStrategyInsights from './sections/AIStrategyInsights';
 import StrategyPlayer from './sections/StrategyPlayer';
 import PositionSizing from './sections/PositionSizing';
-import { generateDemoResults } from './hooks/useDemoData';
+import { trpc } from './providers/trpc';
 
 function App() {
   const [symbol, setSymbol] = useState('SOLUSDT');
@@ -26,14 +26,21 @@ function App() {
   const [leverage, setLeverage] = useState(10);
   const [days, setDays] = useState(60);
   const [activeTab, setActiveTab] = useState<'results' | 'player' | 'sizing' | 'validation' | 'features' | 'ai' | 'about'>('results');
-  const [isRunning, setIsRunning] = useState(false);
-  const [hasResults, setHasResults] = useState(false);
+  const [results, setResults] = useState<ResearchResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [showAIChat, setShowAIChat] = useState(false);
 
-  const results = useMemo(() => {
-    if (!hasResults) return null;
-    return generateDemoResults(symbol, Array.from(selectedRRs));
-  }, [hasResults, symbol, selectedRRs]);
+  const runMutation = trpc.research.run.useMutation({
+    onSuccess: (data) => {
+      setResults(data as ResearchResult);
+      setError(null);
+    },
+    onError: (err) => {
+      setError(err.message);
+    },
+  });
+
+  const isRunning = runMutation.isPending;
 
   const toggleRR = (rr: RRRatio) => {
     const next = new Set(selectedRRs);
@@ -42,11 +49,14 @@ function App() {
   };
 
   const runResearch = () => {
-    setIsRunning(true);
-    setTimeout(() => {
-      setIsRunning(false);
-      setHasResults(true);
-    }, 2000);
+    setError(null);
+    runMutation.mutate({
+      symbol,
+      days,
+      leverage,
+      horizon: 120,
+      rrs: Array.from(selectedRRs),
+    });
   };
 
   return (
@@ -101,9 +111,9 @@ function App() {
                     <><Play size={14}/> Run Research</>
                   )}
                 </button>
-                <button className="btn-rr flex items-center gap-1">
+                <a href="/engine/main.py" download="strategy_engine.py" className="btn-rr flex items-center gap-1" style={{ textDecoration: 'none' }}>
                   <Download size={14}/> Engine
-                </button>
+                </a>
               </div>
             </div>
           </div>
@@ -137,6 +147,17 @@ function App() {
               <div className="p-3" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
                 <AIChat />
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Error Banner */}
+        {error && (
+          <div className="animate-fade-in flex items-start gap-3 p-4 rounded-xl" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', color: 'var(--text-primary)' }}>
+            <AlertCircle size={16} style={{ color: '#ef4444', flexShrink: 0, marginTop: 2 }} />
+            <div className="text-sm">
+              <div className="font-semibold mb-1" style={{ color: '#ef4444' }}>Research failed</div>
+              <div style={{ color: 'var(--text-muted)' }}>{error}</div>
             </div>
           </div>
         )}
@@ -204,7 +225,7 @@ function App() {
         )}
 
         {/* Empty State */}
-        {!hasResults && !isRunning && (
+        {!results && !isRunning && (
           <div className="animate-fade-in text-center py-16">
             <div className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
               <Search size={28} style={{ color: 'var(--text-muted)' }} />
