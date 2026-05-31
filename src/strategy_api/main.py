@@ -17,6 +17,9 @@ def create_app() -> FastAPI:
     def ping():
         return {"ok": True, "ts": int(time.time() * 1000)}
 
+    from strategy_api.routers import market
+    app.include_router(market.router)
+
     return app
 
 app = create_app()
