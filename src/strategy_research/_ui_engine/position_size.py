@@ -132,6 +132,8 @@ def monte_carlo_sizing(
     """
     risk_fractions = np.arange(0.01, 0.51, 0.01)
     results = []
+    # seeded so the Monte Carlo sizing recommendation is reproducible run-to-run
+    rng = np.random.default_rng(2024)
 
     for risk_frac in risk_fractions:
         final_equities = []
@@ -143,7 +145,7 @@ def monte_carlo_sizing(
             max_dd = 0
 
             for _ in range(n_trades):
-                if np.random.random() < win_rate:
+                if rng.random() < win_rate:
                     equity *= (1 + risk_frac * avg_win)
                 else:
                     equity *= (1 - risk_frac * abs(avg_loss))

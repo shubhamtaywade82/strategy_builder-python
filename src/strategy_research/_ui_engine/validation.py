@@ -77,7 +77,9 @@ def shuffle_test(X: pd.DataFrame, y: pd.Series, n_shuffles: int = 10) -> dict:
 
     shuffled_aucs = []
     for i in range(n_shuffles):
-        y_shuf = pd.Series(np.random.permutation(y.values), index=y.index)
+        # seeded per-iteration so the p-value is fully reproducible run-to-run
+        rng = np.random.default_rng(1234 + i)
+        y_shuf = pd.Series(rng.permutation(y.values), index=y.index)
         _, _, y_tr_s, y_te_s = train_test_split(X, y_shuf, test_size=0.3, random_state=42 + i, stratify=y_shuf)
         if y_te_s.nunique() < 2:
             continue

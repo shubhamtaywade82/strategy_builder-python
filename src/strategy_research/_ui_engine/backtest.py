@@ -26,7 +26,6 @@ def backtest(ohlcv: pd.DataFrame, signals: list, up_pct: float, dn_pct: float,
     times = ohlcv["open_time"].to_numpy()
     n = len(ohlcv)
 
-    gross_up = up_pct + fee_cost
     trades = []
 
     for sig in signals:
@@ -36,12 +35,15 @@ def backtest(ohlcv: pd.DataFrame, signals: list, up_pct: float, dn_pct: float,
         side = sig["side"]
         entry = o[min(i + 1, n - 1)]
 
+        # barriers at the literal target/stop distances (fee handled once, below)
         if side == 1:
-            up_b, dn_b = entry * (1 + gross_up), entry * (1 - dn_pct)
+            up_b, dn_b = entry * (1 + up_pct), entry * (1 - dn_pct)
         else:
-            up_b, dn_b = entry * (1 - gross_up), entry * (1 + dn_pct)
+            up_b, dn_b = entry * (1 - up_pct), entry * (1 + dn_pct)
 
         end = min(i + 1 + max_horizon, n)
+        # pr is the RAW signed price move; the round-trip fee is subtracted ONCE
+        # in net_pnl. Charging it here too would double-count it on losses/timeouts.
         label, bte, pr, exit_reason = 0, max_horizon, 0.0, "timeout"
 
         for j in range(i + 1, end):
@@ -50,18 +52,15 @@ def backtest(ohlcv: pd.DataFrame, signals: list, up_pct: float, dn_pct: float,
             else:
                 hit_dn, hit_up = hi[j] >= dn_b, lo[j] <= up_b
 
-            if hit_dn and hit_up:
-                label, bte, pr, exit_reason = 0, j - (i + 1), -dn_pct - fee_cost, "stop"
-                break
+            # conservative: if both barriers touch in the same bar, assume stop first
             if hit_dn:
-                label, bte, pr, exit_reason = 0, j - (i + 1), -dn_pct - fee_cost, "stop"
+                label, bte, pr, exit_reason = 0, j - (i + 1), -dn_pct, "stop"
                 break
             if hit_up:
                 label, bte, pr, exit_reason = 1, j - (i + 1), up_pct, "target"
                 break
         else:
-            raw = (cl[end - 1] - entry) / entry * side
-            pr = raw - fee_cost
+            pr = (cl[end - 1] - entry) / entry * side
 
         net_pnl = (pr - fee_cost) * leverage
         trades.append({
