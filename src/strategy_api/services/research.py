@@ -1,5 +1,6 @@
 from __future__ import annotations
-from typing import Dict, List
+import math
+from typing import Any, Dict, List
 
 import anyio
 from strategy_research import ui_research
@@ -9,6 +10,27 @@ RR_CFGS = {
     "1:1": {"upPct": 0.010, "dnPct": 0.010}, "1:2": {"upPct": 0.005, "dnPct": 0.010},
     "1:3": {"upPct": 0.005, "dnPct": 0.015},
 }
+
+# Engine metrics can be non-finite (e.g. profit_factor is +inf when a side has
+# zero losing trades). JSON has no Infinity/NaN literal, so the response would be
+# invalid JSON the browser cannot parse. Clamp to finite sentinels at the API
+# boundary; finite values pass through untouched.
+_INF_SENTINEL = 1e9
+
+
+def _json_safe(value: Any) -> Any:
+    """Recursively replace non-finite floats so the result serializes to valid JSON."""
+    if isinstance(value, float):
+        if math.isnan(value):
+            return 0.0
+        if math.isinf(value):
+            return _INF_SENTINEL if value > 0 else -_INF_SENTINEL
+        return value
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    return value
 
 
 def _run_blocking(*, symbol, days, leverage, horizon, rrs):
@@ -20,7 +42,7 @@ async def run(symbol, days, leverage, horizon, rrs) -> Dict:
     raw = await anyio.to_thread.run_sync(
         lambda: _run_blocking(symbol=symbol, days=days, leverage=leverage,
                               horizon=horizon, rrs=rrs))
-    return _map_result(raw, symbol, rrs, leverage)
+    return _json_safe(_map_result(raw, symbol, rrs, leverage))
 
 
 def _map_result(raw: Dict, symbol: str, rrs: List[str], leverage: float) -> Dict:
