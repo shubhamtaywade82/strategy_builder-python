@@ -48,3 +48,6 @@ packages = ["src/strategy_builder", "src/strategy_research", "src/strategy_api"]
 strategy-builder = "strategy_builder.cli:main"
 strategy-research = "strategy_research.orchestrator:main"
 strategy-api = "strategy_api.main:run"
+
+[tool.pytest.ini_options]
+markers = ["slow: tests that hit the network or take >5s"]
