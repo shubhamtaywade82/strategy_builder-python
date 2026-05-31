@@ -1,6 +1,6 @@
 import time
 from typing import List, Dict, Any, Optional
-from .session_detector import SessionDetector
+from ..features.session_detector import SessionDetector
 
 class DataNormalizer:
     @staticmethod

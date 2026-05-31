@@ -112,3 +112,7 @@ class OllamaSslBearerClient:
         if self.bearer_token:
             headers["Authorization"] = f"Bearer {self.bearer_token}"
         return headers
+
+
+# Alias so integration modules can import OllamaClient
+OllamaClient = OllamaSslBearerClient
