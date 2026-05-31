@@ -12,7 +12,8 @@ const ENGINE_SCRIPT = path.resolve(
   "../public/engine/main.py"
 );
 
-const PYTHON_BIN = process.env.PYTHON_BIN ?? "python3";
+const __dir = import.meta.dirname ?? path.dirname(new URL(import.meta.url).pathname);
+const PYTHON_BIN = process.env.PYTHON_BIN ?? path.resolve(__dir, "../../venv/bin/python");
 
 function runPython(
   symbol: string,

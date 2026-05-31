@@ -15,7 +15,7 @@ export const chatMessages = mysqlTable("chat_messages", {
   sessionId: varchar("session_id", { length: 64 }).notNull(),
   role: varchar("role", { length: 20 }).notNull(), // user, assistant, system
   content: text("content").notNull(),
-  model: varchar("model", { length: 50 }).default("llama3.1"),
+  model: varchar("model", { length: 50 }).default("qwen3.5:4b"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -44,6 +44,6 @@ export const strategyInsights = mysqlTable("strategy_insights", {
   strategyName: varchar("strategy_name", { length: 100 }).notNull(),
   insightType: varchar("insight_type", { length: 30 }).notNull(), // analysis, optimization, risk_assessment
   content: text("content").notNull(),
-  model: varchar("model", { length: 50 }).default("llama3.1"),
+  model: varchar("model", { length: 50 }).default("qwen3.5:4b"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

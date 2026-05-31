@@ -14,7 +14,7 @@ export interface TickerData {
 }
 
 const FAPI_BASE = "https://fapi.binance.com";
-const WS_BASE = "wss://fstream.binance.com/ws";
+const WS_BASE = "wss://fstream.binance.com/stream?streams=";
 
 async function fetchInitialTicker(symbol: string): Promise<Partial<TickerData>> {
   const sym = symbol.toUpperCase();
@@ -69,7 +69,7 @@ export function useBinanceTicker(symbol: string): TickerData {
 
     const symLower = sym.toLowerCase();
     // Combined stream: mark price (1s) + 24hr ticker (1s)
-    const ws = new WebSocket(`${WS_BASE}/${symLower}@markPrice/${symLower}@ticker`);
+    const ws = new WebSocket(`${WS_BASE}${symLower}@markPrice/${symLower}@ticker`);
     wsRef.current = ws;
 
     ws.onopen = () => {

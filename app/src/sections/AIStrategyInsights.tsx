@@ -129,7 +129,7 @@ export default function AIStrategyInsights({ results }: Props) {
         avgBarsHeld: best.metrics.avgBarsHeld,
         sharpe: best.metrics.sharpe,
       },
-      model: "llama3.1",
+      model: "qwen3.5:4b",
       sessionId: `insights_${Date.now()}`,
     });
   };

@@ -52,7 +52,7 @@ export default function AIChat() {
     },
   ]);
   const [input, setInput] = useState("");
-  const [selectedModel, setSelectedModel] = useState("llama3.1");
+  const [selectedModel, setSelectedModel] = useState("qwen3.5:4b");
   const [isExpanded, setIsExpanded] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const sessionId = useRef(`session_${Date.now()}`);
@@ -70,7 +70,7 @@ export default function AIChat() {
         ...prev,
         {
           role: "assistant",
-          content: `Error: ${err.message}. Make sure Ollama is running (${process.env.OLLAMA_URL || "localhost:11434"}).`,
+          content: `Error: ${err.message}. Make sure Ollama is running (${import.meta.env?.VITE_OLLAMA_URL || "localhost:11434"}).`,
         },
       ]);
     },
@@ -150,7 +150,7 @@ export default function AIChat() {
                 style={{ color: "var(--text-muted)" }}
               >
                 {healthQuery.data?.ok
-                  ? `${healthQuery.data.models[0] || "llama3.1"} ready`
+                  ? `${healthQuery.data.models[0] || "qwen3.5:4b"} ready`
                   : "Ollama offline"}
               </span>
             </div>
@@ -170,7 +170,7 @@ export default function AIChat() {
             onChange={(e) => setSelectedModel(e.target.value)}
             className="input-dark text-[10px] py-1 px-2"
           >
-            <option value="llama3.1">Llama 3.1</option>
+            <option value="qwen3.5:4b">Llama 3.1</option>
             <option value="codellama">CodeLlama</option>
             <option value="mistral">Mistral</option>
             <option value="qwen2.5">Qwen 2.5</option>
