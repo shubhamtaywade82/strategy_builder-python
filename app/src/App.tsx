@@ -61,7 +61,7 @@ function App() {
 
   return (
     <div className="min-h-screen" style={{ background: 'var(--bg-primary)' }}>
-      <Header />
+      <Header symbol={symbol} />
 
       <main className="max-w-[1440px] mx-auto px-4 py-6 space-y-6">
         {/* Hero Section */}
