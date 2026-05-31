@@ -18,7 +18,7 @@ import AIChat from './sections/AIChat';
 import AIStrategyInsights from './sections/AIStrategyInsights';
 import StrategyPlayer from './sections/StrategyPlayer';
 import PositionSizing from './sections/PositionSizing';
-import { trpc } from './providers/trpc';
+import { useResearchRun } from '@/hooks/api';
 
 function App() {
   const [symbol, setSymbol] = useState('SOLUSDT');
@@ -30,7 +30,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [showAIChat, setShowAIChat] = useState(false);
 
-  const runMutation = trpc.research.run.useMutation({
+  const runMutation = useResearchRun({
     onSuccess: (data) => {
       setResults(data as ResearchResult);
       setError(null);
