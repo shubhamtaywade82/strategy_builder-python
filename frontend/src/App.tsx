@@ -2,7 +2,7 @@ import { useState } from 'react';
 import './App.css';
 import {
   Activity, Target, Shield, Zap, Brain,
-  ChevronRight, Download, Play, BarChart,
+  ChevronRight, Play, BarChart,
   PieChart, MessageSquare, Clock, Search,
   Sparkles, X, Gamepad2, Calculator, AlertCircle,
 } from 'lucide-react';
@@ -111,9 +111,6 @@ function App() {
                     <><Play size={14}/> Run Research</>
                   )}
                 </button>
-                <a href="/engine/main.py" download="strategy_engine.py" className="btn-rr flex items-center gap-1" style={{ textDecoration: 'none' }}>
-                  <Download size={14}/> Engine
-                </a>
               </div>
             </div>
           </div>
