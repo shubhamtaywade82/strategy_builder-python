@@ -1,59 +1,22 @@
 """
-Integration Test — Verifies all modules work together.
-Run: python test_integration.py
+Integration tests for the Kimi Agent v2 modules.
+
+Verifies SMC detector, triple-barrier labeler, position sizer,
+and walk-forward validator work correctly using the real installed package.
 """
-import sys
 import random
+import pytest
+import pathlib
+import sys
 import types
 
-# Mock the strategy_builder package hierarchy
-sb = types.ModuleType("strategy_builder")
-sb_domain = types.ModuleType("strategy_builder.domain")
-sb_exceptions = types.ModuleType("strategy_builder.exceptions")
-
-# Mock domain classes
-class Timeframe:
-    M1 = "1m"; M5 = "5m"; M15 = "15m"; M30 = "30m"
-    H1 = "1h"; H4 = "4h"; D1 = "1d"
-
-class Candle:
-    __slots__ = ["timestamp", "open", "high", "low", "close", "volume"]
-    def __init__(self, ts, o, h, l, c, v=1000):
-        self.timestamp = ts
-        self.open = o
-        self.high = h
-        self.low = l
-        self.close = c
-        self.volume = v
-
-class DataError(Exception):
-    pass
-
-sb_domain.Candle = Candle
-sb_domain.Timeframe = Timeframe
-sb_exceptions.DataError = DataError
-
-sys.modules["strategy_builder"] = sb
-sys.modules["strategy_builder.domain"] = sb_domain
-sys.modules["strategy_builder.exceptions"] = sb_exceptions
-
-# Now we can import the modules
-import importlib.util
-
-def load_module(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-smc_mod = load_module("strategy_builder.features.smc_detector", "/mnt/agents/output/integration/smc_detector.py")
-tb_mod = load_module("strategy_builder.backtest.triple_barrier", "/mnt/agents/output/integration/triple_barrier.py")
-ps_mod = load_module("strategy_builder.analytics.position_sizing", "/mnt/agents/output/integration/position_sizing.py")
-wf_mod = load_module("strategy_builder.backtest.walk_forward", "/mnt/agents/output/integration/walk_forward.py")
+# Path to integration modules
+_ROOT = pathlib.Path(__file__).parent.parent / "src" / "strategy_builder"
 
 
-def generate_mock_candles(n=500):
+def _make_candles(n: int = 500):
+    """Generate synthetic Candle objects using the real domain class."""
+    from strategy_builder.domain import Candle
     price = 150.0
     candles = []
     for i in range(n):
@@ -62,85 +25,141 @@ def generate_mock_candles(n=500):
         c = price + change
         h = max(o, c) + abs(random.gauss(0, 0.3))
         l = min(o, c) - abs(random.gauss(0, 0.3))
-        v = random.gauss(10000, 3000)
-        candles.append(Candle(i, o, h, l, c, v))
+        candles.append(Candle(timestamp=i, open=o, high=h, low=l, close=c, volume=1000.0))
         price = c
     return candles
 
 
-def test_smc_detector():
-    profile = smc_mod.SmcDetector.profile(generate_mock_candles(200))
+# ── SMC Detector ─────────────────────────────────────────────────────────────
+
+def test_smc_detector_profile():
+    from strategy_builder.features.smc_detector import SmcDetector
+    candles = _make_candles(200)
+    profile = SmcDetector.profile(candles)
+
     assert "fair_value_gaps" in profile
     assert "order_blocks" in profile
+    assert "liquidity_sweeps" in profile
+    assert "premium_discount" in profile
     s = profile["summary"]
-    print(f"  SMC: {s['bullish_fvg_count']} bull FVGs, "
-          f"{s['active_bull_ob']} active OBs, zone={profile['premium_discount']['zone']}")
-    return True
+    assert "bullish_fvg_count" in s
+    assert "bearish_fvg_count" in s
+    assert "current_zone" in s
+    assert profile["premium_discount"]["zone"] in ("premium", "discount", "equilibrium")
 
 
-def test_triple_barrier():
-    cfg = tb_mod.BarrierConfig(up_pct=0.01, dn_pct=0.005, max_horizon=60)
-    labeler = tb_mod.TripleBarrierLabeler(cfg)
-    labels = labeler.label_both_sides(generate_mock_candles(300))
-    stats = tb_mod.TripleBarrierLabeler.label_stats(labels)
+def test_smc_detector_insufficient_data():
+    from strategy_builder.features.smc_detector import SmcDetector
+    from strategy_builder.domain import Candle
+    tiny = [Candle(timestamp=i, open=100, high=101, low=99, close=100, volume=100) for i in range(5)]
+    result = SmcDetector.profile(tiny)
+    assert "error" in result
+
+
+# ── Triple-Barrier Labeler ────────────────────────────────────────────────────
+
+def test_triple_barrier_labels():
+    from strategy_builder.backtest.triple_barrier import TripleBarrierLabeler, BarrierConfig
+    cfg = BarrierConfig(up_pct=0.01, dn_pct=0.005, max_horizon=60)
+    labeler = TripleBarrierLabeler(cfg)
+    candles = _make_candles(300)
+    labels = labeler.label_both_sides(candles)
+
+    assert len(labels) > 0
+    assert all("long_label" in r for r in labels)
+    assert all("short_label" in r for r in labels)
+    assert all("best_side" in r for r in labels)
+    assert all(r["long_label"] in (0, 1) for r in labels)
+    assert all(r["best_side"] in (-1, 0, 1) for r in labels)
+
+
+def test_triple_barrier_stats():
+    from strategy_builder.backtest.triple_barrier import TripleBarrierLabeler, BarrierConfig
+    cfg = BarrierConfig(up_pct=0.01, dn_pct=0.005, max_horizon=60)
+    labeler = TripleBarrierLabeler(cfg)
+    labels = labeler.label_both_sides(_make_candles(300))
+    stats = TripleBarrierLabeler.label_stats(labels)
+
     assert stats["total"] > 0
-    print(f"  Barrier: n={stats['total']}, long_wr={stats['long_win_pct']}%, "
-          f"best_side={stats['best_side_pct']}%")
-    return True
+    assert 0 <= stats["long_win_pct"] <= 100
+    assert 0 <= stats["short_win_pct"] <= 100
 
 
-def test_position_sizing():
-    sizer = ps_mod.PositionSizer(win_rate=0.576, avg_win=0.0095, avg_loss=0.0059)
+# ── Position Sizer ────────────────────────────────────────────────────────────
+
+def test_kelly_criterion():
+    from strategy_builder.analytics.position_sizing import PositionSizer
+    sizer = PositionSizer(win_rate=0.576, avg_win=0.0095, avg_loss=0.0059)
     kelly = sizer.kelly()
-    size = sizer.fixed_fractional(10000, 2.0, 150, 149.25, 10)
-    regime = sizer.regime_adjusted(10000, 0.02, "trending")
-    assert size["notional"] > 0
-    print(f"  Sizing: Kelly={kelly.half_kelly:.3f} (half), "
-          f"position=${size['notional']:.0f}")
-    return True
+
+    assert kelly.full_kelly >= 0
+    assert kelly.half_kelly == kelly.full_kelly * 0.5
+    assert kelly.quarter_kelly == kelly.full_kelly * 0.25
+    assert kelly.edge > 0  # positive edge given our win_rate/avg_win
 
 
-def test_walk_forward():
+def test_fixed_fractional():
+    from strategy_builder.analytics.position_sizing import PositionSizer
+    result = PositionSizer.fixed_fractional(
+        account_size=10_000, risk_pct=2.0,
+        entry_price=150.0, stop_price=149.25, leverage=10.0
+    )
+    assert result["notional"] > 0
+    assert result["margin_required"] > 0
+    assert result["contracts"] > 0
+
+
+def test_regime_adjusted():
+    from strategy_builder.analytics.position_sizing import PositionSizer
+    for regime, expected_multiplier in [("trending", 1.0), ("ranging", 0.6), ("volatile", 0.4), ("quiet", 1.3)]:
+        r = PositionSizer.regime_adjusted(10_000, 0.02, regime)
+        assert abs(r["multiplier"] - expected_multiplier) < 0.001
+        assert r["adjusted_risk_pct"] == pytest.approx(0.02 * expected_multiplier * 100, rel=1e-4)
+
+
+# ── Walk-Forward Validator (ML) ───────────────────────────────────────────────
+
+def test_walk_forward_validator():
     import pandas as pd
     import numpy as np
     from sklearn.dummy import DummyClassifier
-    
+    from strategy_builder.backtest.walk_forward import WalkForwardValidator
+
     np.random.seed(42)
     X = pd.DataFrame(np.random.randn(1000, 5))
     y = pd.Series(np.random.randint(0, 2, 1000))
-    
-    validator = wf_mod.WalkForwardValidator(n_folds=3, embargo=50)
+
+    validator = WalkForwardValidator(n_folds=3, embargo=50)
     result = validator.validate(X, y, lambda: DummyClassifier(strategy="stratified"))
+
     assert "folds" in result
-    print(f"  WalkForward: {result['folds']} folds, valid={result['is_valid']}")
-    return True
+    assert "is_valid" in result
+    assert "avg_test_auc" in result
+    assert result["folds"] > 0
 
 
-if __name__ == "__main__":
-    print("=" * 60)
-    print("INTEGRATION TEST SUITE")
-    print("=" * 60)
+# ── Feature Builder integration (SMC in build output) ────────────────────────
 
-    tests = [
-        ("SMC Detector", test_smc_detector),
-        ("Triple Barrier", test_triple_barrier),
-        ("Position Sizing", test_position_sizing),
-        ("Walk-Forward CV", test_walk_forward),
-    ]
+def test_feature_builder_includes_smc():
+    from strategy_builder.features.feature_builder import FeatureBuilder
+    from strategy_builder.domain import Candle
+    import time
 
-    passed = 0
-    for name, fn in tests:
-        print(f"\n[{name}]")
-        try:
-            if fn():
-                print(f"  PASS")
-                passed += 1
-        except Exception as e:
-            print(f"  FAIL: {e}")
-            import traceback
-            traceback.print_exc()
+    now_s = int(time.time())
+    candles = []
+    price = 100.0
+    for i in range(200):
+        change = random.gauss(0, 0.3)
+        o = price
+        c = price + change
+        candles.append(Candle(
+            timestamp=now_s + i * 60,
+            open=o, high=max(o, c) + 0.1,
+            low=min(o, c) - 0.1, close=c, volume=500.0
+        ))
+        price = c
 
-    print(f"\n{'=' * 60}")
-    print(f"RESULTS: {passed}/{len(tests)} tests passed")
-    print(f"{'=' * 60}")
-    sys.exit(0 if passed == len(tests) else 1)
+    features = FeatureBuilder.build("TEST", {"5m": candles})
+    assert "smc" in features
+    assert "fair_value_gaps" in features["smc"]
+    assert "summary" in features["smc"]

@@ -144,16 +144,9 @@ RISK WARNING: [specific risk]"""
         return "\n".join(lines)
 
     def _chat(self, prompt: str, model: str) -> str:
-        """Send chat request to Ollama client."""
+        """Send chat request via OllamaSslBearerClient.call_chat_api()."""
         messages = [
             {"role": "system", "content": self.SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
         ]
-        # Assumes client has a chat() or generate() method
-        # Adjust based on actual OllamaClient API
-        if hasattr(self.client, "chat"):
-            return self.client.chat(messages, model=model)
-        elif hasattr(self.client, "generate"):
-            return self.client.generate(prompt, model=model, system=self.SYSTEM_PROMPT)
-        else:
-            raise RuntimeError("OllamaClient must have chat() or generate() method")
+        return self.client.call_chat_api(model=model, messages=messages)
