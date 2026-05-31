@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { trpc } from "@/providers/trpc";
+import { useGenerateStrategy } from "@/hooks/api";
 import {
   Sparkles,
   Loader,
@@ -30,7 +30,7 @@ export default function AIStrategyInsights({ results }: Props) {
   const [generated, setGenerated] = useState(false);
   const [insights, setInsights] = useState<Insight[]>([]);
 
-  const generateMutation = trpc.ai.generateStrategy.useMutation({
+  const generateMutation = useGenerateStrategy({
     onSuccess: (data) => {
       // Parse the AI-generated analysis into structured insights
       const raw = data.analysis;
