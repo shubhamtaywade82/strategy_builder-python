@@ -38,6 +38,11 @@ def create_app() -> FastAPI:
     async def _upstream_error(request: Request, exc: httpx.HTTPError):
         return JSONResponse(status_code=502, content={"error": {"code": 502, "message": str(exc)}})
 
+    import os
+    from fastapi.staticfiles import StaticFiles
+    if os.path.isdir(settings.frontend_dist):
+        app.mount("/", StaticFiles(directory=settings.frontend_dist, html=True), name="static")
+
     return app
 
 app = create_app()
