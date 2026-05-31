@@ -20,6 +20,9 @@ def create_app() -> FastAPI:
     from strategy_api.routers import market
     app.include_router(market.router)
 
+    from strategy_api.routers import ai
+    app.include_router(ai.router)
+
     return app
 
 app = create_app()
