@@ -127,7 +127,8 @@ async def list_models() -> List[str]:
             r = await c.get(f"{settings.ollama_base_url}/api/tags")
             if r.status_code != 200:
                 return []
-            return [m.get("name") or m.get("model") for m in r.json().get("models", [])]
+            names = (m.get("name") or m.get("model") for m in r.json().get("models", []))
+            return [n for n in names if n]
     except Exception:
         return []
 

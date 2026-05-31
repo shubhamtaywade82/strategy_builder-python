@@ -19,7 +19,21 @@ _INF_SENTINEL = 1e9
 
 
 def _json_safe(value: Any) -> Any:
-    """Recursively replace non-finite floats so the result serializes to valid JSON."""
+    """Recursively coerce engine output into JSON-serializable, finite values.
+
+    Engine metrics may be numpy scalars (np.float32/np.int64) or non-finite
+    floats (profit_factor is +inf with zero losing trades). JSON has no
+    Infinity/NaN literal and the default encoder rejects numpy scalars, so both
+    must be normalized at the API boundary. Finite native values pass through.
+    """
+    if isinstance(value, bool):
+        return value
+    if hasattr(value, "item") and not isinstance(value, (dict, list)):
+        # numpy scalar -> native Python scalar
+        try:
+            value = value.item()
+        except (ValueError, AttributeError):
+            pass
     if isinstance(value, float):
         if math.isnan(value):
             return 0.0
@@ -42,10 +56,11 @@ async def run(symbol, days, leverage, horizon, rrs) -> Dict:
     raw = await anyio.to_thread.run_sync(
         lambda: _run_blocking(symbol=symbol, days=days, leverage=leverage,
                               horizon=horizon, rrs=rrs))
-    return _json_safe(_map_result(raw, symbol, rrs, leverage))
+    return _json_safe(_map_result(raw, symbol, rrs, leverage, horizon))
 
 
-def _map_result(raw: Dict, symbol: str, rrs: List[str], leverage: float) -> Dict:
+def _map_result(raw: Dict, symbol: str, rrs: List[str], leverage: float,
+                horizon: int = 120) -> Dict:
     strategies, top_features = [], []
     walk_forward = {"folds": 0, "avgTestAuc": 0.5, "minTestAuc": 0.5, "stability": 0,
                     "degradation": 0, "isValid": False, "foldResults": []}
@@ -109,6 +124,6 @@ def _map_result(raw: Dict, symbol: str, rrs: List[str], leverage: float) -> Dict
     cfg = RR_CFGS.get(primary, {"upPct": 0.01, "dnPct": 0.005})
     return {"symbol": symbol,
             "config": {"symbol": symbol, "rr": primary, "upPct": cfg["upPct"],
-                       "dnPct": cfg["dnPct"], "leverage": leverage, "horizon": 120, "side": "both"},
+                       "dnPct": cfg["dnPct"], "leverage": leverage, "horizon": horizon, "side": "both"},
             "strategies": strategies, "walkForward": walk_forward,
             "topFeatures": top_features, "labels": labels}
