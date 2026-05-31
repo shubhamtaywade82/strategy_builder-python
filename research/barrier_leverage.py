@@ -105,7 +105,7 @@ def _label_one_side(base: pd.DataFrame, side: int, cfg: LevBarrierConfig) -> pd.
                 hit_liq = bh >= liq_b
                 hit_dn = bh >= dn_b
                 hit_up = bl <= up_b
-            if hit_liq and not hit_dn:           # gapped past stop straight to liq
+            if hit_liq:  # Gapped past stop straight to liq, or flash crash in one bar
                 label, b, pret = 0, j - (i + 1), -cfg.liq_distance - cfg.round_trip_cost
                 break
             if hit_dn and hit_up:                # worst case: stop first

@@ -106,7 +106,8 @@ def build_dataset(symbol: str, days: int, meta: Dict, scalp: bool = False) -> pd
     feats = build_mtf_features(frames, base_tf="1m")
     cfg = _config_from_meta(meta, scalp=scalp)
     labels = triple_barrier_both_sides(frames["1m"], cfg)
-    ds = feats.join(labels.set_index("entry_idx"), how="inner").dropna().reset_index(drop=True)
+    labels["open_time"] = frames["1m"]["open_time"].to_numpy()[labels["entry_idx"].to_numpy()]
+    ds = pd.merge(feats, labels, on="open_time", how="inner").dropna().reset_index(drop=True)
     return ds
 
 

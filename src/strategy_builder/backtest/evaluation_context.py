@@ -164,7 +164,15 @@ class EvaluationContext:
             return []
 
         tmax = self._candle_ts(self.current_candle)
-        return [c for c in rows if self._candle_ts(c) <= tmax]
+        
+        # Convert HTF to milliseconds
+        tf_ms = 60_000
+        if timeframe.endswith("m"): tf_ms = int(timeframe[:-1]) * 60_000
+        elif timeframe.endswith("h"): tf_ms = int(timeframe[:-1]) * 3_600_000
+        elif timeframe.endswith("d"): tf_ms = int(timeframe[:-1]) * 86_400_000
+        
+        # Prevent future data leakage: only include the HTF candle if it is fully closed
+        return [c for c in rows if self._candle_ts(c) + tf_ms <= tmax + 60_000]
 
     def _candle_ts(self, candle: Candle) -> int:
         if candle is None:
