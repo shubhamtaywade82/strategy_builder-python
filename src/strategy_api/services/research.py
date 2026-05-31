@@ -1,0 +1,92 @@
+from __future__ import annotations
+from typing import Dict, List
+
+import anyio
+from strategy_research import ui_research
+
+RR_CFGS = {
+    "3:1": {"upPct": 0.015, "dnPct": 0.005}, "2:1": {"upPct": 0.010, "dnPct": 0.005},
+    "1:1": {"upPct": 0.010, "dnPct": 0.010}, "1:2": {"upPct": 0.005, "dnPct": 0.010},
+    "1:3": {"upPct": 0.005, "dnPct": 0.015},
+}
+
+
+def _run_blocking(*, symbol, days, leverage, horizon, rrs):
+    return ui_research.run_research(symbol=symbol, days=days, leverage=leverage,
+                                    horizon=horizon, rrs=rrs)
+
+
+async def run(symbol, days, leverage, horizon, rrs) -> Dict:
+    raw = await anyio.to_thread.run_sync(
+        lambda: _run_blocking(symbol=symbol, days=days, leverage=leverage,
+                              horizon=horizon, rrs=rrs))
+    return _map_result(raw, symbol, rrs, leverage)
+
+
+def _map_result(raw: Dict, symbol: str, rrs: List[str], leverage: float) -> Dict:
+    strategies, top_features = [], []
+    walk_forward = {"folds": 0, "avgTestAuc": 0.5, "minTestAuc": 0.5, "stability": 0,
+                    "degradation": 0, "isValid": False, "foldResults": []}
+    labels = {"longWins": 0, "shortWins": 0, "noTrade": 0, "total": 0}
+
+    for rr in rrs:
+        rr_data = (raw.get("results") or {}).get(rr)
+        if not rr_data:
+            continue
+        for side in ("long", "short"):
+            side_data = rr_data.get(side)
+            if not side_data or side_data.get("error"):
+                continue
+            for strat in side_data.get("strategies", []):
+                m = strat.get("metrics", {})
+                strategies.append({
+                    "id": f"{rr}_{strat.get('name', side)}",
+                    "name": strat.get("name", f"{rr} {side}"),
+                    "description": strat.get("description", ""),
+                    "side": strat.get("side", side),
+                    "conditions": [{"feature": c.get("feature"), "operator": c.get("operator"),
+                                    "threshold": c.get("threshold"), "importance": c.get("importance", 0)}
+                                   for c in strat.get("conditions", [])],
+                    "metrics": {
+                        "tradeCount": m.get("trade_count", 0), "winCount": m.get("win_count", 0),
+                        "lossCount": m.get("loss_count", 0), "winRate": m.get("win_rate", 0),
+                        "profitFactor": m.get("profit_factor", 0), "expectancy": m.get("expectancy", 0),
+                        "netPnl": m.get("net_pnl", 0), "avgWin": m.get("avg_win", 0),
+                        "avgLoss": m.get("avg_loss", 0), "maxDrawdown": m.get("max_drawdown", 0),
+                        "sharpe": m.get("sharpe", 0), "avgBarsHeld": m.get("avg_bars_held", 0),
+                        "targetHitRate": m.get("target_hit_rate", 0),
+                        "stopHitRate": m.get("stop_hit_rate", 0)},
+                    "isViable": strat.get("is_viable", False)})
+            wf = side_data.get("walk_forward")
+            if wf and walk_forward["folds"] == 0:
+                walk_forward = {
+                    "folds": wf.get("folds", 0), "avgTestAuc": wf.get("avg_test_auc", 0.5),
+                    "minTestAuc": wf.get("min_test_auc", 0.5), "stability": wf.get("stability", 0),
+                    "degradation": wf.get("degradation", 0), "isValid": wf.get("is_valid", False),
+                    "foldResults": [{"fold": f.get("fold"), "trainAuc": f.get("train_auc", 0.5),
+                                     "testAuc": f.get("test_auc", 0.5),
+                                     "testPrecision": f.get("test_precision", 0),
+                                     "testRecall": f.get("test_recall", 0),
+                                     "nTrain": f.get("n_train", 0), "nTest": f.get("n_test", 0)}
+                                    for f in wf.get("fold_results", [])]}
+            tf = side_data.get("top_features")
+            if tf and not top_features:
+                top_features = [{"feature": f.get("feature", f.get("name", "")),
+                                 "direction": f.get("direction", "high"),
+                                 "threshold": f.get("threshold", f.get("median_val", 0)),
+                                 "importance": f.get("importance", 0),
+                                 "winRateAbove": f.get("win_rate_above", 0),
+                                 "winRateBelow": f.get("win_rate_below", 0),
+                                 "shapValue": f.get("shap_value", 0)} for f in tf]
+            ls = side_data.get("label_stats")
+            if ls and labels["total"] == 0:
+                labels = {"total": ls.get("total", 0), "longWins": ls.get("long_wins", 0),
+                          "shortWins": ls.get("short_wins", 0), "noTrade": ls.get("no_trade", 0)}
+
+    primary = rrs[0] if rrs else "2:1"
+    cfg = RR_CFGS.get(primary, {"upPct": 0.01, "dnPct": 0.005})
+    return {"symbol": symbol,
+            "config": {"symbol": symbol, "rr": primary, "upPct": cfg["upPct"],
+                       "dnPct": cfg["dnPct"], "leverage": leverage, "horizon": 120, "side": "both"},
+            "strategies": strategies, "walkForward": walk_forward,
+            "topFeatures": top_features, "labels": labels}

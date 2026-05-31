@@ -23,6 +23,9 @@ def create_app() -> FastAPI:
     from strategy_api.routers import ai
     app.include_router(ai.router)
 
+    from strategy_api.routers import research
+    app.include_router(research.router)
+
     return app
 
 app = create_app()
