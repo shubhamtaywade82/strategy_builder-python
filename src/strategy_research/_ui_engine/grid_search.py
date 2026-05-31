@@ -129,8 +129,39 @@ def discover_for_rr(
         print(f"  {side_name}: Running shuffle test...")
         st = shuffle_test(Xs, ys, n_shuffles=10)
 
+        # 8. Robustness gate — a model-confidence strategy is only "viable" if its
+        #    in-sample expectancy is positive AND the model generalises out-of-sample
+        #    (walk-forward valid) AND it beats shuffled labels (significant). This is
+        #    what stops the 96%-WR in-sample artifacts from ranking as deployable.
+        avg_auc = wf.get("avg_test_auc", 0.5)
+        wf_valid = bool(wf.get("is_valid", False))
+        sig = bool(st.get("is_significant", False))
+        p_val = st.get("p_value", 1.0)
+        for s in strategies:
+            in_sample_ok = bool(s.get("is_viable", False))
+            s["is_viable_in_sample"] = in_sample_ok
+            s["is_viable"] = in_sample_ok and wf_valid and sig
+            # 0-100 robustness score from OOS evidence (independent of in-sample PF)
+            sig_pts = (1 - min(p_val / 0.05, 1.0)) * 40
+            auc_pts = max(0.0, min((avg_auc - 0.5) / 0.15, 1.0)) * 35
+            stab_pts = wf.get("stability", 0.0) * 25
+            s["robustness_score"] = round(sig_pts + auc_pts + stab_pts, 1)
+            warns = []
+            if not in_sample_ok:
+                warns.append("in-sample not viable")
+            if not wf_valid:
+                warns.append(f"fails walk-forward (avg test AUC {avg_auc:.3f})")
+            if not sig:
+                warns.append(f"not significant (p={p_val:.3f})")
+            if avg_auc < 0.53:
+                warns.append("AUC near random (overfit)")
+            s["warnings"] = warns
+
         results[side_name] = {
-            "strategies": sorted(strategies, key=lambda s: s["metrics"].get("expectancy", 0), reverse=True),
+            # rank by out-of-sample robustness, NOT in-sample expectancy
+            "strategies": sorted(strategies,
+                                 key=lambda s: (s.get("robustness_score", 0),
+                                                s["metrics"].get("expectancy", 0)), reverse=True),
             "walk_forward": wf,
             "shuffle_test": st,
             "top_features": imp.head(15).to_dict("records"),

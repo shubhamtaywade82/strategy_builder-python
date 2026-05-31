@@ -97,6 +97,46 @@ export interface ResearchResult {
     noTrade: number;
     total: number;
   };
+  player?: PlayerResult;
+}
+
+export interface RuleCell {
+  side: 'long' | 'short';
+  mode: 'momentum' | 'reversion';
+  trade_direction: 'long' | 'short';
+  n_signals: number;
+  baseline: { win_rate: number; expectancy: number };
+  edge_win_rate?: number;
+  edge_expectancy?: number;
+  metrics: {
+    trade_count: number;
+    win_rate: number;
+    profit_factor: number | null;
+    expectancy_net: number;
+    avg_win: number;
+    avg_loss: number;
+    sharpe: number;
+    target_hit_rate: number;
+    avg_bars_held: number;
+    p_value: number;
+  };
+  walk_forward: { folds: Array<{ fold: number; trades: number; expectancy: number | null; win_rate: number | null }>; stability: number };
+  robustness_score: number;
+  is_robust: boolean;
+  warnings: string[];
+}
+
+export interface PlayerResult {
+  error?: string;
+  rr?: string;
+  cost?: number;
+  leverage?: number;
+  horizon_bars?: number;
+  conditions?: Array<{ id: string; label: string }>;
+  long?: { momentum: RuleCell; reversion: RuleCell };
+  short?: { momentum: RuleCell; reversion: RuleCell };
+  best?: RuleCell | null;
+  has_edge?: boolean;
 }
 
 export type RRRatio = '3:1' | '2:1' | '1:1' | '1:2' | '1:3';

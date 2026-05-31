@@ -78,7 +78,10 @@ def _map_strategy(strat: Dict, rr: str, side: str) -> Dict:
             "sharpe": m.get("sharpe", 0), "avgBarsHeld": m.get("avg_bars_held", 0),
             "targetHitRate": m.get("target_hit_rate", 0),
             "stopHitRate": m.get("stop_hit_rate", 0)},
-        "isViable": strat.get("is_viable", False)}
+        "isViable": strat.get("is_viable", False),
+        "isViableInSample": strat.get("is_viable_in_sample", strat.get("is_viable", False)),
+        "robustnessScore": strat.get("robustness_score", 0),
+        "warnings": strat.get("warnings", [])}
 
 
 def _camel_walk_forward(wf: Dict) -> Dict:
@@ -92,6 +95,17 @@ def _camel_walk_forward(wf: Dict) -> Dict:
                          "testRecall": f.get("test_recall", 0),
                          "nTrain": f.get("n_train", 0), "nTest": f.get("n_test", 0)}
                         for f in wf.get("fold_results", [])]}
+
+
+def _map_player(player: Dict) -> Dict:
+    """Pass the rule-strategy block through largely as-is (snake_case keys).
+
+    The frontend StrategyPlayer reads this shape directly; _json_safe handles
+    numpy/inf coercion downstream. Returns {} when the rule run produced nothing.
+    """
+    if not player or player.get("error"):
+        return {"error": (player or {}).get("error", "no rule strategy result")}
+    return player
 
 
 def _map_result(raw: Dict, symbol: str, rrs: List[str], leverage: float,
@@ -149,4 +163,5 @@ def _map_result(raw: Dict, symbol: str, rrs: List[str], leverage: float,
             "config": {"symbol": symbol, "rr": primary, "upPct": cfg["upPct"],
                        "dnPct": cfg["dnPct"], "leverage": leverage, "horizon": horizon, "side": "both"},
             "strategies": strategies, "walkForward": walk_forward,
-            "topFeatures": top_features, "labels": labels, "results": results_map}
+            "topFeatures": top_features, "labels": labels, "results": results_map,
+            "player": _map_player(raw.get("player"))}

@@ -203,9 +203,9 @@ def apply_cooldown(idxs: list, bars: int = COOLDOWN_BARS) -> list:
     return kept
 
 
-def baseline_metrics(d1: pd.DataFrame, side: str, rr: dict, cost: float) -> dict:
+def baseline_metrics(d1: pd.DataFrame, side: str, rr: dict, cost: float, invert: bool = False) -> dict:
     """Null hypothesis: WR/expectancy of RANDOM entries at this RR (geometry+fees)."""
-    side_val = 1 if side == "long" else -1
+    side_val = (1 if side == "long" else -1) * (-1 if invert else 1)
     n = len(d1)
     rng = np.random.default_rng(7)
     idx = rng.choice(np.arange(0, n - HORIZON - 1), size=min(BASELINE_SAMPLE, n - HORIZON - 1),
@@ -220,9 +220,9 @@ def baseline_metrics(d1: pd.DataFrame, side: str, rr: dict, cost: float) -> dict
 # per symbol / side
 # --------------------------------------------------------------------------
 def evaluate_side(mask: pd.DataFrame, d1: pd.DataFrame, side: str, rr: dict,
-                  base: dict, cost: float, fee_label: str) -> dict:
+                  base: dict, cost: float, fee_label: str, invert: bool = False) -> dict:
     col = "sig_long" if side == "long" else "sig_short"
-    side_val = 1 if side == "long" else -1
+    side_val = (1 if side == "long" else -1) * (-1 if invert else 1)
     sig_idx = apply_cooldown(mask.index[mask[col]].tolist())
     signals = [{"bar_idx": int(i), "side": side_val, "confidence": 1.0} for i in sig_idx]
 
@@ -284,23 +284,24 @@ def run_symbol(symbol: str) -> dict:
 
     out = {"symbol": symbol, "bars_1m": len(d1)}
     for side in ("long", "short"):
-        candidates = []
-        for fee_label, cost in FEE_SCENARIOS.items():
-            for rr in RR_GRID.values():
-                base = baseline_metrics(d1, side, rr, cost)
-                res = evaluate_side(mask, d1, side, rr, base, cost, fee_label)
-                candidates.append(res)
-                m = res.get("metrics", {})
-                if m:
-                    flag = "DEPLOY" if res["is_robust"] else "reject"
-                    print(f"  {side.upper():5s} {fee_label:5s} {rr['label']:18s} n={m['trade_count']:4d} "
-                          f"WR={m['win_rate']*100:5.1f}% (base {res['baseline']['win_rate']*100:4.1f}%) "
-                          f"netE={m['expectancy_net']*100:+.3f}% edgeWR={res['edge_win_rate']*100:+.1f}% "
-                          f"p={m['p_value']:.3f} -> {flag}")
-        # best = robust first, then highest expectancy
-        best = max(candidates, key=lambda r: (r.get("is_robust", False),
-                                              r.get("metrics", {}).get("expectancy_net", -9)))
-        out[side] = {"best": best, "all_rr": candidates}
+        for mode, invert in (("momentum", False), ("reversion", True)):
+            candidates = []
+            for fee_label, cost in FEE_SCENARIOS.items():
+                for rr in RR_GRID.values():
+                    base = baseline_metrics(d1, side, rr, cost, invert)
+                    res = evaluate_side(mask, d1, side, rr, base, cost, fee_label, invert)
+                    res["mode"] = mode
+                    candidates.append(res)
+                    m = res.get("metrics", {})
+                    if m:
+                        flag = "DEPLOY" if res["is_robust"] else "reject"
+                        print(f"  {side.upper():5s} {mode:9s} {fee_label:5s} {rr['label']:18s} n={m['trade_count']:4d} "
+                              f"WR={m['win_rate']*100:5.1f}% (base {res['baseline']['win_rate']*100:4.1f}%) "
+                              f"netE={m['expectancy_net']*100:+.3f}% edgeWR={res['edge_win_rate']*100:+.1f}% "
+                              f"p={m['p_value']:.3f} -> {flag}")
+            best = max(candidates, key=lambda r: (r.get("is_robust", False),
+                                                  r.get("metrics", {}).get("expectancy_net", -9)))
+            out[f"{side}_{mode}"] = {"best": best, "all_rr": candidates}
     return out
 
 
@@ -310,13 +311,14 @@ def to_bot_config(all_results: list) -> dict:
            "horizon_bars": HORIZON, "rule": "5-condition (4H trend, 1H BOS, 15m FVG, ATR>60p, Vol>70p)",
            "strategies": []}
     for r in all_results:
-        for side in ("long", "short"):
-            res = r.get(side, {}).get("best", {})
+        for key in [k for k in r if k not in ("symbol", "bars_1m")]:
+            res = r.get(key, {}).get("best", {})
             m = res.get("metrics", {})
             if not m:
                 continue
             cfg["strategies"].append({
-                "symbol": r["symbol"], "side": side,
+                "symbol": r["symbol"], "side": res.get("side", key),
+                "mode": res.get("mode"),
                 "deploy": res["is_robust"],
                 "rr": res["rr"], "fee_scenario": res.get("fee"),
                 "robustness_score": res["robustness_score"],
@@ -353,7 +355,7 @@ def main():
     if not deploy:
         print("  NONE passed. All rule variants are in-sample noise on this window.")
     for s in deploy:
-        print(f"  {s['symbol']:8s} {s['side'].upper():5s} {s['fee_scenario']:5s} {s['rr']:18s} score={s['robustness_score']:.0f} "
+        print(f"  {s['symbol']:8s} {s['side'].upper():5s} {s.get('mode',''):9s} {s['fee_scenario']:5s} {s['rr']:18s} score={s['robustness_score']:.0f} "
               f"WR={s['win_rate']*100:.1f}% PF={s['profit_factor']} "
               f"netE={s['expectancy_net']*100:+.4f}% p={s['p_value']:.3f} n={s['trades']}")
 
