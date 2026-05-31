@@ -26,6 +26,18 @@ def create_app() -> FastAPI:
     from strategy_api.routers import research
     app.include_router(research.router)
 
+    from fastapi import Request
+    from fastapi.responses import JSONResponse
+    import httpx
+
+    @app.exception_handler(ValueError)
+    async def _value_error(request: Request, exc: ValueError):
+        return JSONResponse(status_code=400, content={"error": {"code": 400, "message": str(exc)}})
+
+    @app.exception_handler(httpx.HTTPError)
+    async def _upstream_error(request: Request, exc: httpx.HTTPError):
+        return JSONResponse(status_code=502, content={"error": {"code": 502, "message": str(exc)}})
+
     return app
 
 app = create_app()
