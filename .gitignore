@@ -64,3 +64,6 @@ app/dist/
 app/.env
 app/.env.local
 app/db/migrations/*.sql
+
+# Runtime SQLite DB (data persisted on disk, not versioned)
+sqlite.db
