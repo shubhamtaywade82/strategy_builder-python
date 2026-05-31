@@ -4,7 +4,7 @@
  */
 
 const OLLAMA_BASE = process.env.OLLAMA_URL || "http://localhost:11434";
-const DEFAULT_MODEL = process.env.OLLAMA_MODEL || "llama3.1";
+const DEFAULT_MODEL = process.env.OLLAMA_MODEL || "qwen3.5:4b";
 
 export interface OllamaMessage {
   role: "system" | "user" | "assistant";

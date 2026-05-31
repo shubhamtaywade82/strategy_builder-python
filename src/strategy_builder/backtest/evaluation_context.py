@@ -164,9 +164,40 @@ class EvaluationContext:
             return []
 
         tmax = self._candle_ts(self.current_candle)
-        return [c for c in rows if self._candle_ts(c) <= tmax]
+        
+        # Convert HTF to milliseconds
+        tf_ms = 60_000
+        if timeframe.endswith("m"): tf_ms = int(timeframe[:-1]) * 60_000
+        elif timeframe.endswith("h"): tf_ms = int(timeframe[:-1]) * 3_600_000
+        elif timeframe.endswith("d"): tf_ms = int(timeframe[:-1]) * 86_400_000
+        
+        # Prevent future data leakage: only include the HTF candle if it is fully closed
+        return [c for c in rows if self._candle_ts(c) + tf_ms <= tmax + 60_000]
 
     def _candle_ts(self, candle: Candle) -> int:
         if candle is None:
             return 0
         return candle.get_timestamp_int()
+
+    def mtf_rsi(self, timeframe: str, period: int = 14) -> Optional[float]:
+        key = f"mtf_rsi_{timeframe}_{period}"
+        if key not in self._memo:
+            series = self._mtf_series_up_to(timeframe)
+            if not series:
+                return None
+            vals = MomentumEngine.rsi(series, period=period)
+            compact = [v for v in vals if v is not None]
+            self._memo[key] = compact[-1] if compact else None
+        return self._memo[key]
+
+    def mtf_ema(self, timeframe: str, period: int = 20) -> Optional[float]:
+        key = f"mtf_ema_{timeframe}_{period}"
+        if key not in self._memo:
+            series = self._mtf_series_up_to(timeframe)
+            if not series:
+                return None
+            closes = [c.close for c in series]
+            vals = MomentumEngine.ema(closes, period=period)
+            compact = [v for v in vals if v is not None]
+            self._memo[key] = compact[-1] if compact else None
+        return self._memo[key]

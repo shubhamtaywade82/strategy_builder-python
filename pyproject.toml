@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "strategy-builder"
 version = "0.2.0"
 description = "AI-powered Binance strategy builder with XGBoost research pipeline and React UI"
-requires-python = ">=3.9"
+requires-python = ">=3.8"
 dependencies = [
     "pydantic>=2.0.0",
     "requests>=2.31.0",

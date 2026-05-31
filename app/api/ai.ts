@@ -30,7 +30,7 @@ export const aiRouter = createRouter({
             content: z.string(),
           })
         ),
-        model: z.string().optional().default("llama3.1"),
+        model: z.string().optional().default("qwen3.5:4b"),
         temperature: z.number().optional().default(0.7),
         sessionId: z.string().optional(),
       })
@@ -91,7 +91,7 @@ export const aiRouter = createRouter({
         rr: z.string(),
         features: z.array(z.string()),
         metrics: z.record(z.number()),
-        model: z.string().optional().default("llama3.1"),
+        model: z.string().optional().default("qwen3.5:4b"),
         sessionId: z.string().optional(),
       })
     )
@@ -130,7 +130,7 @@ export const aiRouter = createRouter({
           low24h: z.number(),
           volume24h: z.number(),
         }),
-        model: z.string().optional().default("llama3.1"),
+        model: z.string().optional().default("qwen3.5:4b"),
       })
     )
     .mutation(async ({ input }) => {

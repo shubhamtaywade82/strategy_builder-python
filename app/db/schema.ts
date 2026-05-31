@@ -1,49 +1,45 @@
 import {
-  mysqlTable,
-  serial,
-  varchar,
+  sqliteTable,
   text,
-  timestamp,
-  float,
-  json,
-  int,
-} from "drizzle-orm/mysql-core";
+  integer,
+  real,
+} from "drizzle-orm/sqlite-core";
 
 // Chat messages with AI assistant
-export const chatMessages = mysqlTable("chat_messages", {
-  id: serial("id").primaryKey(),
-  sessionId: varchar("session_id", { length: 64 }).notNull(),
-  role: varchar("role", { length: 20 }).notNull(), // user, assistant, system
+export const chatMessages = sqliteTable("chat_messages", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  sessionId: text("session_id").notNull(),
+  role: text("role").notNull(), // user, assistant, system
   content: text("content").notNull(),
-  model: varchar("model", { length: 50 }).default("llama3.1"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  model: text("model").default("qwen3.5:4b"),
+  createdAt: integer("created_at", { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
 });
 
 // Research sessions (saved strategy research runs)
-export const researchSessions = mysqlTable("research_sessions", {
-  id: serial("id").primaryKey(),
-  sessionId: varchar("session_id", { length: 64 }).notNull().unique(),
-  symbol: varchar("symbol", { length: 20 }).notNull(),
-  rrConfig: varchar("rr_config", { length: 50 }).notNull(),
-  leverage: int("leverage").notNull().default(10),
-  days: int("days").notNull().default(60),
-  status: varchar("status", { length: 20 }).notNull().default("pending"), // pending, running, completed, failed
+export const researchSessions = sqliteTable("research_sessions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  sessionId: text("session_id").notNull().unique(),
+  symbol: text("symbol").notNull(),
+  rrConfig: text("rr_config").notNull(),
+  leverage: integer("leverage").notNull().default(10),
+  days: integer("days").notNull().default(60),
+  status: text("status").notNull().default("pending"), // pending, running, completed, failed
   resultJson: text("result_json"),
   bestStrategy: text("best_strategy"),
-  winRate: float("win_rate"),
-  profitFactor: float("profit_factor"),
-  expectancy: float("expectancy"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  winRate: real("win_rate"),
+  profitFactor: real("profit_factor"),
+  expectancy: real("expectancy"),
+  createdAt: integer("created_at", { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
 });
 
 // AI-generated strategy insights
-export const strategyInsights = mysqlTable("strategy_insights", {
-  id: serial("id").primaryKey(),
-  sessionId: varchar("session_id", { length: 64 }).notNull(),
-  strategyName: varchar("strategy_name", { length: 100 }).notNull(),
-  insightType: varchar("insight_type", { length: 30 }).notNull(), // analysis, optimization, risk_assessment
+export const strategyInsights = sqliteTable("strategy_insights", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  sessionId: text("session_id").notNull(),
+  strategyName: text("strategy_name").notNull(),
+  insightType: text("insight_type").notNull(), // analysis, optimization, risk_assessment
   content: text("content").notNull(),
-  model: varchar("model", { length: 50 }).default("llama3.1"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  model: text("model").default("qwen3.5:4b"),
+  createdAt: integer("created_at", { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
 });

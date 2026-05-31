@@ -52,7 +52,7 @@ COINDCX_API_SECRET="your_coindcx_api_secret"
 
 # --- LLM Configuration (For Research) ---
 OLLAMA_BASE_URL="http://127.0.0.1:11434"
-OLLAMA_AGENT_MODEL="llama3.1:8b"
+OLLAMA_AGENT_MODEL="qwen3.5:4b"
 
 # --- Market Data ---
 STRATEGY_BUILDER_MARKET_DATA_SOURCE="binance"

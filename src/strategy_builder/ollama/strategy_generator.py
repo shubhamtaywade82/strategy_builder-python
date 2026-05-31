@@ -6,24 +6,24 @@ Adds to: src/strategy_builder/ollama/strategy_generator.py
 Usage:
     from strategy_builder.ollama.strategy_generator import StrategyGenerator
     from strategy_builder.ollama.ssl_bearer_client import OllamaClient  # existing
-    
+
     client = OllamaClient()  # your existing Ollama client
     gen = StrategyGenerator(client)
-    
+
     # Generate strategy from backtest results
     strategy = gen.generate(
         symbol="SOLUSDT",
         features=feature_dict,      # from FeatureBuilder.build()
         metrics=backtest_metrics,   # from your backtest
-        model="llama3.1",
+        model="qwen3.5:4b",
     )
-    
+
     # Get market analysis
     analysis = gen.analyze_market(
         symbol="SOLUSDT",
         current_price=150.0,
         regime="trending",
-        model="llama3.1",
+        model="qwen3.5:4b",
     )
 """
 from typing import Dict, Any, Optional
@@ -48,7 +48,7 @@ Be concise, specific, and ground all advice in provided data."""
         symbol: str,
         features: Dict[str, Any],
         metrics: Dict[str, float],
-        model: str = "llama3.1",
+        model: str = "qwen3.5:4b",
     ) -> Dict[str, str]:
         """Generate strategy rule from features + metrics."""
         prompt = self._build_strategy_prompt(symbol, features, metrics)
@@ -60,7 +60,7 @@ Be concise, specific, and ground all advice in provided data."""
         symbol: str,
         current_price: float,
         regime: str,
-        model: str = "llama3.1",
+        model: str = "qwen3.5:4b",
     ) -> Dict[str, str]:
         """Get AI market analysis."""
         prompt = f"""Analyze {symbol} current conditions:
@@ -80,7 +80,7 @@ Provide:
         symbol: str,
         current_strategy: str,
         backtest_metrics: Dict[str, float],
-        model: str = "llama3.1",
+        model: str = "qwen3.5:4b",
     ) -> Dict[str, str]:
         """Optimize an existing strategy based on metrics."""
         prompt = f"""Optimize this strategy for {symbol}:

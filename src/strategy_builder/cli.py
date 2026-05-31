@@ -47,6 +47,7 @@ def main():
     # catalog
     catalog_p = subparsers.add_parser("catalog", help="List catalog entries")
     catalog_p.add_argument("--status")
+    catalog_p.add_argument("--format", choices=["text", "markdown"], default="text")
 
     # templates
     templates_p = subparsers.add_parser("templates", help="List templates")
@@ -66,10 +67,6 @@ def main():
         return
 
     cfg = Configuration()
-    if args.instruments:
-        cfg.default_instruments = args.instruments
-    if args.timeframes:
-        cfg.default_timeframes = args.timeframes
 
     # Setup client (mock for now as in original if not configured)
     from .ollama.ssl_bearer_client import OllamaSslBearerClient
@@ -78,6 +75,8 @@ def main():
     agent = AgentLoop(client=client)
 
     if args.command == "research":
+        if args.instruments: cfg.default_instruments = args.instruments
+        if args.timeframes: cfg.default_timeframes = args.timeframes
         res = agent.run(query=args.query)
         print("\n=== Research Complete ===")
         print(f"Steps: {len(res['steps'])}")
@@ -118,10 +117,30 @@ def main():
     elif args.command == "catalog":
         cat = StrategyCatalog()
         entries = cat.by_status(args.status) if args.status else cat.all()
-        print(f"\n=== Strategy Catalog ({len(entries)} entries) ===")
-        for e in entries:
-            score = e.get("ranking", {}).get("final_score", "N/A")
-            print(f"  [{e['id']}] {e['strategy']['name']} — {e['status']} — score: {score}")
+        
+        if args.format == "markdown":
+            print("# Strategy Catalog\n")
+            print("| ID | Name | Instrument | Status | Score |")
+            print("| :--- | :--- | :--- | :--- | :--- |")
+            for e in entries:
+                if not e: continue
+                ranking = e.get("ranking") or {}
+                score = ranking.get("final_score", "N/A")
+                if isinstance(score, float): score = round(score, 2)
+                
+                strategy = e.get("strategy") or {}
+                name = strategy.get("name", "Unknown")
+                inst = strategy.get("instrument", "All")
+                print(f"| {e['id']} | {name} | {inst} | {e['status']} | {score} |")
+        else:
+            print(f"\n=== Strategy Catalog ({len(entries)} entries) ===")
+            for e in entries:
+                if not e: continue
+                ranking = e.get("ranking") or {}
+                score = ranking.get("final_score", "N/A")
+                strategy = e.get("strategy") or {}
+                name = strategy.get("name", "Unknown")
+                print(f"  [{e['id']}] {name} — {e['status']} — score: {score}")
 
     elif args.command == "templates":
         print("\n=== Strategy Templates ===")

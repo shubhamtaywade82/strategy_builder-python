@@ -111,6 +111,41 @@ STRATEGY_LIBRARY = [
         "name": "Delta_Neutral_Basis_Trade",
         "entry": {"conditions": ["delta_neutral_basis_entry"]},
         "exit": {"targets": [1.0], "partial_exits": [1.0]}
+    },
+    {
+        "name": "MTF_Trend_Alignment_1m_to_1d",
+        "entry": {"conditions": ["mtf_trend_alignment_entry"]},
+        "exit": {"targets": [2.0], "trail": None}
+    },
+    {
+        "name": "Advanced_MTF_Trend_Alignment",
+        "entry": {"conditions": ["advanced_mtf_trend_alignment_entry"]},
+        "exit": {
+            # 1.05R to account for ~0.1% fee on a 1:1 trade, 2.1R for 1:2
+            "targets": [1.05, 2.1], 
+            "partial_exits": [0.5, 1.0], 
+            "trail": "atr_2.0"
+        }
+    },
+    {
+        "name": "Ignition_Momentum_1Pct_Edge",
+        "entry": {"conditions": ["ignition_momentum_continuation_entry"]},
+        "exit": {
+            # Since min stop is 0.75%, 1.5R target guarantees > 1.1% minimum price move.
+            # 2.5R target captures a 1.87% move.
+            "targets": [1.5, 2.5], 
+            "partial_exits": [0.5, 1.0],
+            "trail": "atr_1.5"
+        }
+    },
+    {
+        "name": "Institutional_Edge_Sweep_MSS",
+        "entry": {"conditions": ["institutional_edge_sweep_mss"]},
+        "exit": {
+            # 2.0R on a 0.5% stop = 1% move target.
+            "targets": [2.0],
+            "trail": "atr_2.0"
+        }
     }
 ]
 
@@ -118,6 +153,9 @@ STRATEGY_LIBRARY = [
 TIMEFRAME_COMBOS = [
     ("15m", "1h", "15m/1h"),
     ("1h", "4h", "1h/4h"),
+    ("1m", "1h", "1m/1h_MTF_Full"),
+    ("1m", "1d", "1m/1d_Advanced_MTF"),
+    ("30m", "4h", "30m/4h_Swing_Edge"),
 ]
 
 
@@ -139,7 +177,10 @@ class CryptoFuturesResearcher:
         start_date = end_date - timedelta(days=days)
 
         # Fetch all timeframes we might need
-        all_tfs = list(dict.fromkeys([tf for combo in TIMEFRAME_COMBOS for tf in combo[:2]]))
+        # Explicitly include all TFs for the MTF alignment strategy
+        all_tfs = list(dict.fromkeys([
+            "1m", "5m", "15m", "30m", "1h", "4h", "1d"
+        ] + [tf for combo in TIMEFRAME_COMBOS for tf in combo[:2]]))
         try:
             mtf_data = self.loader.fetch_mtf(
                 instrument=self.symbol,
@@ -230,9 +271,12 @@ class CryptoFuturesResearcher:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--symbol", type=str, default="BTCUSDT", help="Crypto futures symbol (e.g. BTCUSDT)")
-    parser.add_argument("--days", type=int, default=30, help="Number of days to research")
+    parser.add_argument("--symbol", type=str, default=None, help="Crypto futures symbol (e.g. BTCUSDT)")
+    parser.add_argument("--days", type=int, default=7, help="Number of days to research")
     args = parser.parse_args()
 
-    researcher = CryptoFuturesResearcher(args.symbol)
-    researcher.run(days=args.days)
+    symbols = [args.symbol] if args.symbol else ["SOLUSDT", "XRPUSDT", "ETHUSDT", "BTCUSDT"]
+    
+    for symbol in symbols:
+        researcher = CryptoFuturesResearcher(symbol)
+        researcher.run(days=args.days)
