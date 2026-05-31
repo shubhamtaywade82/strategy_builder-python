@@ -8,10 +8,10 @@ import pandas as pd
 import xgboost as xgb
 from typing import Dict, List
 
-from .features import build_mtf_features
-from .labels import BarrierCfg, label_both_sides
-from .backtest import backtest
-from .validation import walk_forward, shuffle_test
+from features import build_mtf_features
+from labels import BarrierCfg, label_both_sides
+from backtest import backtest
+from validation import walk_forward, shuffle_test
 
 
 RR_CONFIGS = {

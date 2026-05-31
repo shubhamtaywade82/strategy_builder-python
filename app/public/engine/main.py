@@ -4,8 +4,10 @@ Strategy Research Runner - Multi-RR Grid Search
 Usage: python main.py --symbol SOLUSDT --days 60 --output result.json
 """
 import argparse
+import os
 import sys
-sys.path.insert(0, ".")
+# Insert the engine directory so sibling modules resolve regardless of CWD
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from data_fetcher import fetch_symbol_mtf
 from grid_search import run_grid_search

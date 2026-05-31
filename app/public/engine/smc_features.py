@@ -195,7 +195,7 @@ def compute_smc_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def compute_all_features(frames: dict, base_tf: str = "1m") -> pd.DataFrame:
     """Build complete feature matrix: MTF + SMC."""
-    from .features import build_mtf_features
+    from features import build_mtf_features
 
     # Get base MTF features
     features = build_mtf_features(frames, base_tf)

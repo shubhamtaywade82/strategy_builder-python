@@ -163,3 +163,94 @@ def test_feature_builder_includes_smc():
     assert "smc" in features
     assert "fair_value_gaps" in features["smc"]
     assert "summary" in features["smc"]
+
+
+# ── WebSocket Client (structure only — no network) ────────────────────────────
+
+def test_websocket_client_classes():
+    from strategy_builder.market_data.binance_websocket_client import (
+        BinanceKlineStream, BinanceCombinedStream, BinanceMiniTickerStream
+    )
+    for cls in (BinanceKlineStream, BinanceCombinedStream, BinanceMiniTickerStream):
+        assert hasattr(cls, "start")
+        assert hasattr(cls, "stop")
+        assert hasattr(cls, "is_alive")
+
+
+def test_binance_kline_stream_init():
+    from strategy_builder.market_data.binance_websocket_client import BinanceKlineStream
+    stream = BinanceKlineStream(
+        symbol="SOLUSDT",
+        interval="1m",
+        on_candle=lambda c: None,
+        on_error=lambda e: None,
+    )
+    assert stream.symbol == "SOLUSDT"
+    assert stream.interval == "1m"
+    assert not stream.running
+    assert not stream.is_alive()
+
+
+def test_binance_combined_stream_init():
+    from strategy_builder.market_data.binance_websocket_client import BinanceCombinedStream
+    stream = BinanceCombinedStream(
+        streams=[("SOLUSDT", "1m"), ("BTCUSDT", "4h")],
+        on_candle=lambda sym, iv, c: None,
+    )
+    assert len(stream.streams) == 2
+    assert not stream.running
+
+
+def test_mini_ticker_stream_init():
+    from strategy_builder.market_data.binance_websocket_client import BinanceMiniTickerStream
+    stream = BinanceMiniTickerStream(symbol="SOLUSDT")
+    assert stream.symbol == "SOLUSDT"
+    assert stream.get_price() == 0.0
+    assert stream.get_change_24h_pct() == 0.0
+
+
+# ── Live Executor (structure only — no WebSocket) ─────────────────────────────
+
+def test_live_executor_structure():
+    from strategy_builder.live.live_strategy_executor import LiveStrategyExecutor, Signal, ActiveTrade
+    assert hasattr(LiveStrategyExecutor, "start")
+    assert hasattr(LiveStrategyExecutor, "stop")
+    assert hasattr(LiveStrategyExecutor, "get_stats")
+
+    executor = LiveStrategyExecutor(
+        symbol="SOLUSDT",
+        rules=[{
+            "name": "Test Long",
+            "side": "LONG",
+            "conditions": [{"feature": "trend", "operator": ">", "value": 0}],
+            "target_pct": 0.01,
+            "stop_pct": 0.005,
+        }],
+        paper=True,
+    )
+    assert executor.symbol == "SOLUSDT"
+    assert len(executor.rules) == 1
+    stats = executor.get_stats()
+    assert stats["signals_generated"] == 0
+    assert stats["trades_open"] == 0
+
+
+def test_both_directions_engine_structure():
+    from strategy_builder.live.both_directions_rule_engine import (
+        BothDirectionsEngine, DirectionSignal, SessionPnL
+    )
+    assert hasattr(BothDirectionsEngine, "start")
+    assert hasattr(BothDirectionsEngine, "stop")
+    assert hasattr(BothDirectionsEngine, "get_stats")
+
+    engine = BothDirectionsEngine(
+        symbol="SOLUSDT",
+        long_rules=[{"name": "Long Rule", "conditions": [], "target_pct": 0.01, "stop_pct": 0.005}],
+        short_rules=[{"name": "Short Rule", "conditions": [], "target_pct": 0.01, "stop_pct": 0.005}],
+        paper=True,
+    )
+    assert engine.symbol == "SOLUSDT"
+    stats = engine.get_stats()
+    assert "long_signals" in stats
+    assert "short_signals" in stats
+    assert "total_pnl" in stats
