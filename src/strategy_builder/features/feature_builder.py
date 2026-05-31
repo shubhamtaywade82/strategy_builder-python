@@ -6,6 +6,7 @@ from .volatility_profile import VolatilityProfile
 from .structure_detector import StructureDetector
 from .volume_profile import VolumeProfile
 from .momentum_engine import MomentumEngine
+from .smc_detector import SmcDetector
 from ..domain import Candle
 from ..exceptions import DataError
 
@@ -30,6 +31,7 @@ class FeatureBuilder:
             "structure": StructureDetector.profile(primary_candles),
             "volume": VolumeProfile.profile(primary_candles),
             "momentum": MomentumEngine.profile(primary_candles),
+            "smc": SmcDetector.profile(primary_candles),
             "per_timeframe_summary": FeatureBuilder._build_per_tf_summary(mtf_candles)
         }
 
