@@ -30,6 +30,37 @@ def test_map_result_uses_request_horizon():
     assert mapped["config"]["horizon"] == 240
 
 
+def test_results_map_feeds_validation_and_overview_panels():
+    # Shape ValidationPanel + ResultsOverview read: results.results[rr].{strategies,
+    # walk_forward (mixed snake + camel), shuffle_test}.
+    raw = {"symbol": "X", "results": {"1:1": {
+        "long": {
+            "strategies": [{"name": "s", "side": "long", "conditions": [],
+                            "metrics": {"win_rate": 0.6, "profit_factor": 1.5,
+                                        "expectancy": 0.01, "trade_count": 40},
+                            "is_viable": True}],
+            "top_features": [],
+            "walk_forward": {"folds": 2, "avg_test_auc": 0.6, "min_test_auc": 0.55,
+                             "stability": 0.8, "degradation": -0.02, "is_valid": True,
+                             "fold_results": [{"fold": 1, "train_auc": 0.7, "test_auc": 0.6,
+                                               "test_precision": 0.5, "test_recall": 0.4}]},
+            "shuffle_test": {"real_auc": 0.6, "shuffled_auc_mean": 0.5, "p_value": 0.01,
+                             "is_significant": True},
+            "label_stats": {"total": 10, "long_wins": 4, "short_wins": 3, "no_trade": 3}},
+        "short": {"error": "x"}}}}
+    out = _json_safe(_map_result(raw, "X", ["1:1"], 10))
+    rr = out["results"]["1:1"]
+    # ResultsOverview rrData reads camel strategy metrics
+    assert rr["strategies"][0]["isViable"] is True
+    assert rr["strategies"][0]["metrics"]["winRate"] == 0.6
+    # ValidationPanel reads mixed keys off walk_forward
+    wf = rr["walk_forward"]
+    assert wf["isValid"] is True              # camel alias
+    assert wf["avg_test_auc"] == 0.6          # engine snake
+    assert wf["foldResults"][0]["test_auc"] == 0.6   # camel alias, snake items
+    assert rr["shuffle_test"]["real_auc"] == 0.6
+
+
 def test_mapped_profit_factor_infinity_is_finite():
     raw = {"symbol": "X", "results": {"1:1": {"long": {
         "strategies": [{"name": "s", "side": "long", "conditions": [],
