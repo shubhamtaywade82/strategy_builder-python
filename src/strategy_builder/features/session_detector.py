@@ -17,11 +17,19 @@ class SessionDetector:
     def tag_candles(candles: List[Candle]) -> List[Dict[str, Any]]:
         results = []
         for candle in candles:
-            ts = candle.timestamp
+            if isinstance(candle, dict):
+                ts = candle.get('timestamp')
+                c_data = candle.copy()
+            else:
+                ts = candle.timestamp
+                c_data = candle.model_dump() if hasattr(candle, 'model_dump') else vars(candle)
+                
             if isinstance(ts, int):
                 dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-            else:
+            elif ts is not None:
                 dt = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+            else:
+                continue
             
             hour = dt.hour
             sessions = []
@@ -36,10 +44,8 @@ class SessionDetector:
                         sessions.append(name)
             
             # Create a dict with candle data + sessions
-            results.append({
-                **candle.model_dump(),
-                'sessions': sessions
-            })
+            c_data['sessions'] = sessions
+            results.append(c_data)
         return results
 
     @staticmethod
@@ -88,7 +94,7 @@ class SessionDetector:
 
     @staticmethod
     def utc_day_bounds(reference_candle: Candle) -> Tuple[int, int]:
-        ts = reference_candle.timestamp
+        ts = reference_candle.get('timestamp') if isinstance(reference_candle, dict) else reference_candle.timestamp
         if isinstance(ts, int):
             dt = datetime.fromtimestamp(ts, tz=timezone.utc)
         else:
