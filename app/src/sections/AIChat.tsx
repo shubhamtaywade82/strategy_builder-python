@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { trpc } from "@/providers/trpc";
+import { useAiHealth, useAiChat } from "@/hooks/api";
 import {
   Send,
   Bot,
@@ -57,8 +57,8 @@ export default function AIChat() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const sessionId = useRef(`session_${Date.now()}`);
 
-  const healthQuery = trpc.ai.health.useQuery();
-  const chatMutation = trpc.ai.chat.useMutation({
+  const healthQuery = useAiHealth();
+  const chatMutation = useAiChat({
     onSuccess: (data) => {
       setMessages((prev) => [
         ...prev,
