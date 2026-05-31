@@ -57,3 +57,10 @@ Thumbs.db
 .project
 .classpath
 .settings/
+
+# Node / Web App
+app/node_modules/
+app/dist/
+app/.env
+app/.env.local
+app/db/migrations/*.sql
