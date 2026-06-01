@@ -1,10 +1,25 @@
 """
 Walk-Forward Validation with Purged CV
+
+Determinism: every model is trained single-threaded (``n_jobs=1``) with a fixed
+``random_state``, and every random draw goes through a seeded ``np.random``
+Generator. The same inputs therefore produce byte-identical AUCs and p-values.
 """
 import numpy as np
 import pandas as pd
 import xgboost as xgb
 from sklearn.metrics import roc_auc_score, precision_score, recall_score
+
+# Single global seed so walk-forward / shuffle / OOS prediction are reproducible.
+SEED = 42
+
+# Deterministic XGBoost config shared across validation models. ``hist`` +
+# single thread removes the float-accumulation nondeterminism multi-threaded
+# boosting otherwise introduces.
+_XGB_KW = dict(
+    n_estimators=100, max_depth=4, learning_rate=0.1,
+    tree_method="hist", n_jobs=1, random_state=SEED, verbosity=0,
+)
 
 
 def anchored_splits(n: int, n_folds: int = 5, embargo: int = 120):
@@ -32,9 +47,8 @@ def walk_forward(X: pd.DataFrame, y: pd.Series, n_folds: int = 5, embargo: int =
             continue
 
         model = xgb.XGBClassifier(
-            n_estimators=100, max_depth=4, learning_rate=0.1,
             scale_pos_weight=(y_tr == 0).sum() / max((y_tr == 1).sum(), 1),
-            random_state=42, n_jobs=-1,
+            **_XGB_KW,
         )
         model.fit(X_tr, y_tr)
 
@@ -66,22 +80,54 @@ def walk_forward(X: pd.DataFrame, y: pd.Series, n_folds: int = 5, embargo: int =
     }
 
 
-def shuffle_test(X: pd.DataFrame, y: pd.Series, n_shuffles: int = 10) -> dict:
-    """Compare real AUC vs shuffled AUC to detect leakage."""
-    from sklearn.model_selection import train_test_split
-    X_tr, X_te, y_tr, y_te = train_test_split(X.fillna(0), y, test_size=0.3, random_state=42, stratify=y)
+def oos_predict(X: pd.DataFrame, y: pd.Series, n_folds: int = 5, embargo: int = 120) -> pd.Series:
+    """Out-of-sample probabilities via purged anchored walk-forward.
 
-    model = xgb.XGBClassifier(n_estimators=100, max_depth=4, learning_rate=0.1, random_state=42)
+    For each anchored split the model is trained on the past and used to predict
+    ONLY the embargoed future block. The concatenation is a leakage-free
+    prediction for every bar that falls in some test window; bars never used as
+    test (the initial training block and embargo gaps) stay ``NaN``.
+
+    This is what the grid search backtests instead of in-sample predictions —
+    the single change that turns the 96% illusion into an honest number.
+    """
+    n = len(X)
+    out = pd.Series(np.nan, index=X.index, dtype=float)
+    Xf = X.fillna(0)
+
+    for tr_idx, te_idx in anchored_splits(n, n_folds, embargo):
+        tr = list(tr_idx)
+        te = list(te_idx)
+        y_tr = y.iloc[tr]
+        if len(tr) < 100 or len(te) < 1 or y_tr.nunique() < 2:
+            continue
+        model = xgb.XGBClassifier(
+            scale_pos_weight=(y_tr == 0).sum() / max((y_tr == 1).sum(), 1),
+            **_XGB_KW,
+        )
+        model.fit(Xf.iloc[tr], y_tr)
+        out.iloc[te] = model.predict_proba(Xf.iloc[te])[:, 1]
+
+    return out
+
+
+def shuffle_test(X: pd.DataFrame, y: pd.Series, n_shuffles: int = 10) -> dict:
+    """Compare real AUC vs shuffled AUC to detect leakage (seeded -> deterministic)."""
+    from sklearn.model_selection import train_test_split
+    rng = np.random.default_rng(SEED)
+    X_tr, X_te, y_tr, y_te = train_test_split(X.fillna(0), y, test_size=0.3, random_state=SEED, stratify=y)
+
+    model = xgb.XGBClassifier(**_XGB_KW)
     model.fit(X_tr, y_tr)
     real_auc = roc_auc_score(y_te, model.predict_proba(X_te)[:, 1]) if y_te.nunique() > 1 else 0.5
 
     shuffled_aucs = []
     for i in range(n_shuffles):
-        y_shuf = pd.Series(np.random.permutation(y.values), index=y.index)
-        _, _, y_tr_s, y_te_s = train_test_split(X, y_shuf, test_size=0.3, random_state=42 + i, stratify=y_shuf)
+        y_shuf = pd.Series(rng.permutation(y.values), index=y.index)
+        _, _, y_tr_s, y_te_s = train_test_split(X, y_shuf, test_size=0.3, random_state=SEED + i, stratify=y_shuf)
         if y_te_s.nunique() < 2:
             continue
-        m = xgb.XGBClassifier(n_estimators=100, max_depth=4, learning_rate=0.1, random_state=42 + i)
+        m = xgb.XGBClassifier(**dict(_XGB_KW, random_state=SEED + i))
         m.fit(X_tr, y_tr_s)
         shuffled_aucs.append(roc_auc_score(y_te_s, m.predict_proba(X_te)[:, 1]))
 

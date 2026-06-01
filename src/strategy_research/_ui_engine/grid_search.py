@@ -11,7 +11,8 @@ from typing import Dict, List
 from .features import build_mtf_features
 from .labels import BarrierCfg, label_both_sides
 from .backtest import backtest
-from .validation import walk_forward, shuffle_test
+from .validation import walk_forward, shuffle_test, oos_predict, SEED, _XGB_KW
+from .robustness import score_robustness
 
 
 RR_CONFIGS = {
@@ -67,14 +68,12 @@ def discover_for_rr(
             print(f"  {side_name}: insufficient data")
             continue
 
-        # 3. Train model
+        # 3. Train one full-sample model — used ONLY for descriptive feature
+        #    importance, never for performance claims. (Deterministic config.)
         pos_weight = (ys == 0).sum() / max((ys == 1).sum(), 1)
-        model = xgb.XGBClassifier(
-            n_estimators=150, max_depth=5, learning_rate=0.08,
-            scale_pos_weight=pos_weight, random_state=42, n_jobs=-1,
-        )
+        model = xgb.XGBClassifier(scale_pos_weight=pos_weight, **_XGB_KW)
         model.fit(Xs, ys)
-        probs = model.predict_proba(Xs)[:, 1]
+        in_sample_probs = model.predict_proba(Xs)[:, 1]
 
         # 4. Feature importance
         imp = pd.DataFrame({
@@ -82,55 +81,71 @@ def discover_for_rr(
             "importance": model.feature_importances_,
         }).sort_values("importance", ascending=False)
 
-        # 5. Extract rules from top features
-        strategies = []
-        for threshold in [0.55, 0.60, 0.65, 0.70]:
-            signals = [
-                {"bar_idx": int(idx), "side": 1 if side_name == "long" else -1, "confidence": float(p)}
-                for idx, p in zip(Xs.index, probs) if p >= threshold
-            ]
-            if not signals:
-                continue
-
-            bt = backtest(data_1m, signals, cfg["up_pct"], cfg["dn_pct"], leverage, cost, horizon)
-            m = bt.metrics
-
-            viable = m.get("trade_count", 0) >= 20 and m.get("expectancy", 0) > 0
-
-            # Extract top conditions
-            top_feats = imp.head(5)
-            conditions = []
-            for _, row in top_feats.iterrows():
-                feat = row["feature"]
-                median_val = Xs[feat].median()
-                wr_high = ys[Xs[feat] >= median_val].mean()
-                direction = ">=" if wr_high > 0.5 else "<"
-                conditions.append({
-                    "feature": feat, "operator": direction,
-                    "threshold": float(median_val), "importance": float(row["importance"]),
-                })
-
-            strategies.append({
-                "name": f"{side_name}_threshold_{threshold}",
-                "description": f"{side_name.upper()} when model confidence >= {threshold}",
-                "side": side_name,
-                "threshold": threshold,
-                "conditions": conditions,
-                "metrics": m,
-                "is_viable": viable,
-                "n_signals": len(signals),
-            })
-
-        # 6. Walk-forward validation
+        # 5. Out-of-sample diagnostics FIRST — they gate everything below.
         print(f"  {side_name}: Running walk-forward validation...")
         wf = walk_forward(Xs, ys, n_folds=5, embargo=horizon)
-
-        # 7. Shuffle test
         print(f"  {side_name}: Running shuffle test...")
         st = shuffle_test(Xs, ys, n_shuffles=10)
 
+        # 6. Honest signals: purged walk-forward OUT-OF-SAMPLE probabilities.
+        #    Backtesting these (not the in-sample fit) is what kills the
+        #    96%-win-rate illusion — a memorized model can't peek at the test bars.
+        print(f"  {side_name}: Generating out-of-sample predictions...")
+        oos_probs = oos_predict(Xs, ys, n_folds=5, embargo=horizon)
+        side_val = 1 if side_name == "long" else -1
+
+        # Shared condition table (descriptive, from top features).
+        conditions = []
+        for _, row in imp.head(5).iterrows():
+            feat = row["feature"]
+            median_val = Xs[feat].median()
+            wr_high = ys[Xs[feat] >= median_val].mean()
+            conditions.append({
+                "feature": feat, "operator": ">=" if wr_high > 0.5 else "<",
+                "threshold": float(median_val), "importance": float(row["importance"]),
+            })
+
+        strategies = []
+        for threshold in [0.55, 0.60, 0.65, 0.70]:
+            # OUT-OF-SAMPLE signals (bars the model never trained on at predict time)
+            oos_sel = oos_probs[oos_probs >= threshold]
+            oos_signals = [{"bar_idx": int(idx), "side": side_val, "confidence": float(p)}
+                           for idx, p in oos_sel.items()]
+            if len(oos_signals) < 5:
+                continue
+            oos_bt = backtest(data_1m, oos_signals, cfg["up_pct"], cfg["dn_pct"], leverage, cost, horizon)
+            oos_m = oos_bt.metrics
+
+            # In-sample backtest kept ONLY for transparency / overfit contrast.
+            is_signals = [{"bar_idx": int(idx), "side": side_val, "confidence": float(p)}
+                          for idx, p in zip(Xs.index, in_sample_probs) if p >= threshold]
+            is_m = backtest(data_1m, is_signals, cfg["up_pct"], cfg["dn_pct"], leverage, cost, horizon).metrics
+
+            rob = score_robustness(wf, st, oos_m)
+
+            strategies.append({
+                "name": f"{side_name}_threshold_{threshold}",
+                "description": f"{side_name.upper()} when model confidence >= {threshold} (out-of-sample)",
+                "side": side_name,
+                "threshold": threshold,
+                "conditions": conditions,
+                "metrics": oos_m,                      # OUT-OF-SAMPLE — the honest numbers
+                "in_sample_metrics": is_m,             # for transparency only
+                "robustness_score": rob["robustness_score"],
+                "is_robust": rob["is_robust"],
+                "is_viable": rob["is_robust"],          # gate = robustness, not in-sample fit
+                "is_viable_in_sample": bool(is_m.get("trade_count", 0) >= 20 and is_m.get("expectancy", 0) > 0),
+                "warnings": rob["warnings"],
+                "n_signals": len(oos_signals),
+            })
+
         results[side_name] = {
-            "strategies": sorted(strategies, key=lambda s: s["metrics"].get("expectancy", 0), reverse=True),
+            # Rank by out-of-sample robustness, then OOS expectancy as tiebreak.
+            "strategies": sorted(
+                strategies,
+                key=lambda s: (s["robustness_score"], s["metrics"].get("expectancy", 0)),
+                reverse=True,
+            ),
             "walk_forward": wf,
             "shuffle_test": st,
             "top_features": imp.head(15).to_dict("records"),
