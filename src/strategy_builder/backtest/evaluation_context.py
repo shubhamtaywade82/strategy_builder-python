@@ -14,9 +14,15 @@ import logging
 class EvaluationContext:
     def __init__(self, candles: List[Candle], strategy: Dict[str, Any], mtf_candles: Optional[Dict[str, List[Candle]]] = None):
         self.logger = logging.getLogger("EvaluationContext")
-        self.candles = candles
+        self.candles = [Candle(**c) if isinstance(c, dict) else c for c in candles]
         self.strategy = strategy
-        self.mtf_candles = mtf_candles
+        if mtf_candles:
+            self.mtf_candles = {
+                tf: [Candle(**c) if isinstance(c, dict) else c for c in tf_candles]
+                for tf, tf_candles in mtf_candles.items()
+            }
+        else:
+            self.mtf_candles = None
         self.index = len(candles) - 1
         self.current_candle = candles[-1] if candles else None
         self.previous_candle = candles[-2] if len(candles) >= 2 else None

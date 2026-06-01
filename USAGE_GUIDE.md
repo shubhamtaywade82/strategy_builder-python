@@ -60,7 +60,51 @@ STRATEGY_BUILDER_MARKET_DATA_SOURCE="binance"
 
 ---
 
-## 4. Usage Mode 1: Strategy Research (CLI)
+## 4. Usage Mode 0: Web Dashboard (FastAPI + React)
+
+The dashboard runs the multi-RR XGBoost research pipeline from a browser. It is served by a single Python **FastAPI** backend (`src/strategy_api/`) that imports the research engine in-process — there is no Node backend and no duplicate engine. The React frontend lives in `frontend/` and talks to the backend over REST (`/api/*`).
+
+### Backend dependencies
+
+Already covered by `pip install -e ".[dev]"` (adds `fastapi`, `uvicorn`, `httpx`, `sqlalchemy`, `pydantic-settings`).
+
+### Development (two processes)
+
+```bash
+# 1. Start the FastAPI backend on port 8000
+venv/bin/uvicorn strategy_api.main:app --reload --port 8000
+
+# 2. In another shell, start the Vite dev server (proxies /api -> :8000)
+cd frontend
+npm install
+npm run dev      # http://localhost:3000
+```
+
+Open http://localhost:3000, configure symbol / R:R ratios / leverage / days, and click **Run Research**.
+
+### Production (single process)
+
+```bash
+cd frontend && npm run build           # emits frontend/dist
+venv/bin/uvicorn strategy_api.main:app --port 8000
+```
+
+FastAPI serves the built React bundle and the `/api/*` endpoints from the same port (8000).
+
+### REST endpoints
+
+- `POST /api/research/run` — run the multi-RR grid search (body: `{symbol, days, leverage, horizon, rrs}`)
+- `GET  /api/ai/health`, `POST /api/ai/chat`, `POST /api/ai/generate-strategy`, `GET /api/ai/history`, `GET /api/ai/sessions`, `GET /api/ai/insights`, `POST /api/ai/save-session`, `POST /api/ai/market-analysis`, `POST /api/ai/clear-history`
+- `GET  /api/market/{mark-price,ticker-24h,klines,top-symbols}`
+- `GET  /api/ping`
+
+Chat history, research sessions, and AI insights persist to `sqlite.db` at the repo root.
+
+> **Note:** `OLLAMA_BASE_URL` and `OLLAMA_AGENT_MODEL` from your `.env` drive the AI features. `PYTHON_BIN` is no longer needed (the old Node backend used it to spawn Python — the backend is now Python itself).
+
+---
+
+## 5. Usage Mode 1: Strategy Research (CLI)
 
 The `strategy-builder` CLI is the entry point for the "AI Agent Desk". It uses LLMs to discover market patterns and propose strategies.
 
@@ -87,7 +131,7 @@ strategy-builder pipeline "Research BTC momentum strategies" \
 
 ---
 
-## 5. Usage Mode 2: Execution Engine (Bot)
+## 6. Usage Mode 2: Execution Engine (Bot)
 
 To run the live trading bot that executes orders based on specific technical logic:
 
@@ -110,7 +154,7 @@ python examples/crypto_futures_bot.py
 
 ---
 
-## 6. Usage Mode 3: Custom Backtesting
+## 7. Usage Mode 3: Custom Backtesting
 
 For running professional, multi-timeframe backtests on local strategies, use the `examples/crypto_futures_pro.py` template:
 
@@ -129,7 +173,7 @@ results = engine.run(strategy=my_strategy_config, candles=mtf_data["15m"])
 
 ---
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 - **Ollama Connection**: Ensure the Ollama server is running locally (`ollama serve`) before running research commands.
 - **API Errors**: If CoinDCX returns `401`, double-check your `X-AUTH-APIKEY` and secret in the `.env` file.
