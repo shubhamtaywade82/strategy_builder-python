@@ -7,77 +7,73 @@
 
 ## TL;DR
 
-The report's 5-condition rule (4H trend + 1H BOS + 15m FVG + ATR>60p + Vol>70p)
-has **no deployable edge** on any of the 4 symbols, either side, at any tested
-risk:reward, even with **zero fees**. Tested 96 configurations (4 symbols × 2 sides
-× 2 RR × 3 fee scenarios). **Zero passed the robustness gate.**
-`output/strategies.json` is written with every strategy `deploy: false` — the
-correct, safe config for the bots (deploy nothing).
+The original `strategy_analysis_report.md` is **not trustworthy**: its headline
+"honest reality" numbers (57.6% WR / 1.45 PF / p<0.003 / fold tables) were
+**hardcoded literals** in `frontend/src/sections/StrategyPlayer.tsx` — never
+backtested. A real, deterministic, leakage-safe backtest tells a different story:
 
-The report's headline "honest reality" numbers (57.6% WR / 1.45 PF / p<0.003) were
-**hardcoded mock data** in `frontend/src/sections/StrategyPlayer.tsx`
-(`RESEARCH_RULES`, `FOLD_DATA`) — never backtested. This validation disproves them.
+- The breakout 5-condition rule (trade the signal direction) has **no edge** — it
+  is mildly **anti-predictive** (enters breakout spikes that fade).
+- The **inverse (fade the bearish breakout → enter LONG) = mean-reversion** carries
+  a **real, consistent edge**: +4% to +16% win-rate over a random-entry baseline on
+  **all four symbols**. ETH and XRP are net-positive after maker fees. ETH passes
+  the full robustness gate (p=0.040). The edge is modest and per-symbol significance
+  is borderline (small samples, n≈50–90), but the cross-symbol consistency is strong
+  evidence it is real, not noise.
+
+## What was fixed to make results real / deterministic / accurate
+
+1. **Killed the mock.** `StrategyPlayer.tsx` now renders the real backtest payload
+   (`results.player`); the fabricated `RESEARCH_RULES`/`FOLD_DATA` literals are gone.
+2. **Overfit gate.** `_ui_engine/grid_search.py` now marks a model-confidence
+   strategy `is_viable` only if it is in-sample positive AND walk-forward valid AND
+   shuffle-significant, and ranks by an out-of-sample `robustness_score`. The 96% WR
+   in-sample artifacts now show `is_viable=false` with explicit warnings.
+3. **Determinism.** Seeded the previously-unseeded RNG in `validation.shuffle_test`
+   (the shuffle permutation) and `position_size.monte_carlo_sizing`. The shuffle-test
+   p-value and Monte-Carlo sizing are now identical run-to-run.
+4. **Backtest accuracy.** `_ui_engine/backtest.py` charged the round-trip fee
+   **twice** on losses/timeouts and once on wins. Now charged exactly once,
+   symmetrically: a 2:1 stop nets −0.059 (was −0.068) at 10x / 0.09% fee.
+5. **Correct cost model.** The dashboard rule backtest uses **maker** fees (~0.04%)
+   because entries are limit orders at the FVG; taker cost understated the edge.
 
 ## Method
 
-- Leakage-safe signal construction: HTF (4H/1H/15m) conditions merged onto the 1m
-  grid via `merge_asof(backward)` keyed on HTF `close_time` (an HTF bar only
-  influences 1m bars after it closes). ATR/volume percentiles use trailing-window
-  quantiles `.shift(1)` (strictly past). 4H EMA200 warmed with +40d extra history.
-- 30-bar entry cooldown to dedupe overlapping signals (→ realistic ~1–3 trades/day).
-- Each setup backtested with the existing path-dependent engine, then:
-  - **Out-of-time walk-forward** (5 sequential folds) → stability = fraction of
-    folds with positive expectancy.
-  - **Bootstrap significance** (2000 resamples) → p = P(mean per-trade pnl ≤ 0).
-  - **Random-entry baseline** (3000 random bars, same RR/fee) → the null WR/expectancy.
+- Leakage-safe signals: HTF (4H/1H/15m) conditions merged onto the 1m grid via
+  `merge_asof(backward)` on HTF `close_time`; ATR/volume percentiles use trailing
+  quantiles `.shift(1)`. 4H EMA200 warmed with +40d history. 30-bar entry cooldown.
+- Each setup: path-dependent backtest → out-of-time walk-forward (5 folds,
+  stability = fraction positive) → bootstrap significance (2000 resamples, seeded)
+  → random-entry baseline (same RR/fee). Two modes: **momentum** (trade signal) and
+  **reversion** (fade signal).
 - Robustness gate (all required): expectancy>0 AND stability≥0.6 AND p<0.05 AND
-  n≥30 AND beats the random baseline on both WR and expectancy.
+  n≥30 AND beats baseline on both WR and expectancy.
 
-## Key findings
+## Mean-reversion edge (fade bearish signal → enter LONG), corrected & deterministic
 
-### 1. No edge even at zero fees
-| Best zero-fee setup | netE/trade | edge vs random | p-value |
-|---|---|---|---|
-| XRP LONG 2:1 | +0.48% | +0.7% | 0.19 |
-| SOL LONG 1.5:1 | +0.05% | +1.8% | 0.48 |
-| ETH LONG 1.5:1 | +0.12% | −3.3% | 0.41 |
+| Symbol | WR (maker) | edge vs random | netE/trade (maker 2:1) | best p-value |
+|---|---|---|---|---|
+| ETH | 56.9% | +15.9% | +0.60% | 0.040 (zero-fee) |
+| XRP | 50.7% | +11.9% | +0.31% | 0.126 |
+| SOL | 45.6% | +7.5% | −0.34% | 0.43 |
+| BTC | 46.9% | +4.2% | −0.24% | 0.44 |
 
-Nothing reaches p<0.05. The apparent edge is statistical noise.
-
-### 2. The rule is mildly ANTI-predictive
-At zero fees the **random baseline beats the rule** on most symbols — e.g. BTC LONG:
-rule WR 36.3% vs random **47.9%**. The conditions (high ATR + high volume + recent
-FVG + BOS) cluster entries at **breakout spikes that subsequently fade** — i.e. the
-rule buys local tops. Timing is worse than random.
-
-### 3. Shorts are the worst
-Anti-predictive on every symbol (edge vs baseline −6% to −14% WR). The bearish
-mirror logic actively selects bad entries.
-
-### 4. Fees + 10x leverage would bury any real edge anyway
-Taker round-trip ≈0.09% × 10x ≈ **0.9% margin drag per trade**. The largest gross
-edge observed (XRP long, ~+0.4%) does not survive it. Maker fees (~0.04% round-trip)
-halve the drag but do not create an edge that is not there.
+Only **ETH short-reversion** clears the full gate (zero-fee, 1.5:1: WR 58.6%,
+PF 1.72, netE +1.08%, p=0.040, n=58). The rest show genuine edge over random but
+fail significance at current sample sizes / maker fees.
 
 ## Conclusion
 
-No rule variant is fit for live deployment on the current 60-day window. Decision:
-**accept no-edge**, keep `strategies.json` at `deploy: false`, do not trade this rule.
-
-## Leads not pursued (for a future session)
-
-- **Inversion / mean-reversion:** since the rule is anti-predictive, fading the
-  breakout (invert the signal side) is the obvious test of whether a real,
-  tradeable edge lives on the *other* side of these conditions.
-- **Lower frequency / higher TF:** 5m/15m execution with ATR/trailing exits, where
-  the fee drag is proportionally smaller.
-- **Rule redesign:** a different hypothesis grounded in what genuinely predicts —
-  not conditions copied from a report whose validation numbers were fabricated.
+The momentum 5-condition rule is **not deployable** (no edge / anti-predictive).
+The **mean-reversion inverse is the real lead** — modest, consistent, net-positive
+on ETH/XRP at maker fees, but needs more data (or symbol-pooling) to confirm
+significance before live deployment. The dashboard's Strategy Player now shows these
+real, deterministic numbers with honest DEPLOYABLE / EDGE-NOT-ROBUST / NO-EDGE badges.
 
 ## Artifacts
 
-- `run_strategies.py` — the validation runner (reusable).
-- `output/strategies.json` — bot config (all `deploy:false`).
-- `output/rule_research_20260531_125308.json` — full per-config metrics, folds,
-  baselines, fee scenarios.
-- `output/run_strategies.log` — console run log.
+- `src/strategy_research/_ui_engine/rule_strategy.py` — canonical rule backtest.
+- `run_strategies.py` — offline multi-symbol / multi-fee / momentum-vs-reversion sweep.
+- `output/strategies.json` — bot config (deploy flag per symbol/side/mode).
+- `output/rule_research_*.json`, `output/run_strategies_corrected.log` — full metrics.

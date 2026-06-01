@@ -36,6 +36,15 @@ def _player_block(symbol: str, data: dict, days: int, rr: str,
                          cost=maker_cost, leverage=leverage, horizon=horizon)
 
 
+def _fetch_and_build(symbol: str, days: int):
+    """Fetch MTF data and build features. Shared by sync and streaming paths."""
+    data = fetch_symbol_mtf(symbol, days=days)
+    if "1m" not in data or len(data["1m"]) < 1000:
+        raise ValueError(f"Insufficient 1m data for {symbol}")
+    features = build_mtf_features(data)
+    return data, features
+
+
 def run_research(
     symbol: str,
     days: int = 60,
@@ -45,11 +54,7 @@ def run_research(
     rrs: Optional[List[str]] = None,
 ) -> dict:
     rrs = rrs or ["2:1"]
-    data = fetch_symbol_mtf(symbol, days=days)
-    if "1m" not in data or len(data["1m"]) < 1000:
-        raise ValueError(f"Insufficient 1m data for {symbol}")
-
-    features = build_mtf_features(data)
+    data, features = _fetch_and_build(symbol, days)
 
     results = {}
     for rr in rrs:
@@ -67,3 +72,37 @@ def run_research(
         player = {"error": str(exc)}
 
     return {"symbol": symbol, "results": results, "player": player}
+
+
+def run_research_streaming(
+    symbol: str,
+    days: int = 60,
+    leverage: float = 10.0,
+    cost: float = 0.0009,
+    horizon: int = 120,
+    rrs: Optional[List[str]] = None,
+):
+    """Generator that yields partial results after each RR, then the final result.
+
+    Yields dicts with keys: type ('partial' | 'complete'), symbol, results, player.
+    """
+    rrs = rrs or ["2:1"]
+    data, features = _fetch_and_build(symbol, days)
+
+    results = {}
+    for rr in rrs:
+        if rr not in RR_CONFIGS:
+            continue
+        try:
+            results[rr] = discover_for_rr(features, data["1m"], rr, leverage, cost, horizon)
+        except Exception as exc:
+            results[rr] = {"long": {"error": str(exc)}, "short": {"error": str(exc)}}
+        yield {"type": "partial", "symbol": symbol, "results": dict(results), "player": {}}
+
+    try:
+        player = _player_block(symbol, data, days, rrs[0], cost, leverage, horizon)
+    except Exception as exc:
+        log.warning("rule strategy failed: %s", exc)
+        player = {"error": str(exc)}
+
+    yield {"type": "complete", "symbol": symbol, "results": results, "player": player}

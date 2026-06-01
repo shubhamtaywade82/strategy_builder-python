@@ -61,7 +61,9 @@ class BinanceUMKlineLoader:
         rows: List[list] = []
         cursor = start_ms
         while cursor < end_ms:
-            batch = self._request(symbol, interval, cursor, end_ms, limit=MAX_LIMIT)
+            expected_bars = (end_ms - cursor) // step + 1
+            current_limit = min(MAX_LIMIT, max(1, expected_bars))
+            batch = self._request(symbol, interval, cursor, end_ms, limit=current_limit)
             if not batch:
                 break
             rows.extend(batch)
@@ -70,7 +72,7 @@ class BinanceUMKlineLoader:
             if nxt <= cursor:  # guard against non-advancing cursor
                 break
             cursor = nxt
-            if len(batch) < MAX_LIMIT:
+            if len(batch) < current_limit:
                 break
             time.sleep(0.12)  # stay well under the IP weight limit (2400/min)
         return self._to_frame(rows, symbol, interval)

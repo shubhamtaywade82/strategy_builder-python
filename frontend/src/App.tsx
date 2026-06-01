@@ -5,6 +5,7 @@ import {
   ChevronRight, Play, BarChart,
   PieChart, MessageSquare, Clock, Search,
   Sparkles, X, Gamepad2, Calculator, AlertCircle,
+  CheckCircle,
 } from 'lucide-react';
 import { type RRRatio, type ResearchResult, RR_CONFIGS } from './types';
 import Header from './sections/Header';
@@ -31,6 +32,10 @@ function App() {
   const [showAIChat, setShowAIChat] = useState(false);
 
   const runMutation = useResearchRun({
+    onPartial: (data) => {
+      setResults(data as ResearchResult);
+      setError(null);
+    },
     onSuccess: (data) => {
       setResults(data as ResearchResult);
       setError(null);
@@ -41,6 +46,7 @@ function App() {
   });
 
   const isRunning = runMutation.isPending;
+  const completedRRs = results?.results ? Object.keys(results.results) : [];
 
   const toggleRR = (rr: RRRatio) => {
     const next = new Set(selectedRRs);
@@ -50,6 +56,7 @@ function App() {
 
   const runResearch = () => {
     setError(null);
+    setResults(null);
     runMutation.mutate({
       symbol,
       days,
@@ -250,20 +257,29 @@ function App() {
 
         {/* Running State */}
         {isRunning && (
-          <div className="animate-fade-in text-center py-16">
-            <div className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center animate-pulse" style={{ background: 'var(--bg-card)', border: '1px solid var(--accent-blue)' }}>
-              <Activity size={28} style={{ color: 'var(--accent-blue)' }} />
+          <div className="animate-fade-in text-center py-8">
+            <div className="w-12 h-12 rounded-2xl mx-auto mb-3 flex items-center justify-center animate-pulse" style={{ background: 'var(--bg-card)', border: '1px solid var(--accent-blue)' }}>
+              <Activity size={22} style={{ color: 'var(--accent-blue)' }} />
             </div>
-            <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--text-secondary)' }}>
+            <h3 className="text-base font-semibold mb-2" style={{ color: 'var(--text-secondary)' }}>
               Running Multi-RR Grid Search...
             </h3>
             <div className="max-w-md mx-auto space-y-1">
-              {Array.from(selectedRRs).map((rr, i) => (
-                <div key={rr} className="flex items-center gap-2 text-sm animate-slide-in" style={{ color: 'var(--text-muted)', animationDelay: `${i * 0.2}s` }}>
-                  <ChevronRight size={14} style={{ color: 'var(--accent-blue)' }} />
-                  <span>Searching RR {rr} — {RR_CONFIGS[rr].label}</span>
-                </div>
-              ))}
+              {Array.from(selectedRRs).map((rr, i) => {
+                const isDone = completedRRs.includes(rr);
+                return (
+                  <div key={rr} className="flex items-center gap-2 text-sm animate-slide-in" style={{ color: 'var(--text-muted)', animationDelay: `${i * 0.2}s` }}>
+                    {isDone ? (
+                      <CheckCircle size={14} style={{ color: 'var(--accent-green)' }} />
+                    ) : (
+                      <ChevronRight size={14} style={{ color: 'var(--accent-blue)' }} />
+                    )}
+                    <span style={isDone ? { color: 'var(--accent-green)' } : undefined}>
+                      {isDone ? 'Completed' : 'Searching'} RR {rr} — {RR_CONFIGS[rr].label}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

@@ -170,9 +170,9 @@ export default function AIChat() {
             onChange={(e) => setSelectedModel(e.target.value)}
             className="input-dark text-[10px] py-1 px-2"
           >
-            <option value="qwen3.5:4b">Llama 3.1</option>
-            <option value="codellama">CodeLlama</option>
-            <option value="mistral">Mistral</option>
+            <option value="qwen3.5:4b">Qwen 3.5:4b</option>
+            <option value="llama3.1:8b">Llama 3.1 8b</option>
+            <option value="llama3.2:3b">LLama 3.2 3b</option>
             <option value="qwen2.5">Qwen 2.5</option>
           </select>
           <button

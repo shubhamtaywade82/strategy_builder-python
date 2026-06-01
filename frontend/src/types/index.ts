@@ -97,7 +97,13 @@ export interface ResearchResult {
     noTrade: number;
     total: number;
   };
+  results?: Record<string, any>;
   player?: PlayerResult;
+}
+
+export interface ResearchStreamChunk {
+  type: 'partial' | 'complete';
+  data: ResearchResult;
 }
 
 export interface RuleCell {

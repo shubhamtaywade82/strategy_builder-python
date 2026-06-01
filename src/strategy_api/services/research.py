@@ -1,9 +1,12 @@
 from __future__ import annotations
 import math
-from typing import Any, Dict, List
+from typing import Any, AsyncGenerator, Dict, List
 
 import anyio
+from sqlalchemy.orm import Session
+
 from strategy_research import ui_research
+from strategy_api.services import cache as cache_svc
 
 RR_CFGS = {
     "3:1": {"upPct": 0.015, "dnPct": 0.005}, "2:1": {"upPct": 0.010, "dnPct": 0.005},
@@ -52,11 +55,83 @@ def _run_blocking(*, symbol, days, leverage, horizon, rrs):
                                     horizon=horizon, rrs=rrs)
 
 
-async def run(symbol, days, leverage, horizon, rrs) -> Dict:
+def _run_streaming_blocking(*, symbol, days, leverage, horizon, rrs):
+    yield from ui_research.run_research_streaming(
+        symbol=symbol, days=days, leverage=leverage, horizon=horizon, rrs=rrs
+    )
+
+
+async def run(symbol, days, leverage, horizon, rrs, db: Session) -> Dict:
+    param_hash = cache_svc.compute_param_hash(symbol, days, leverage, horizon, rrs)
+    cached = cache_svc.get_cached_run(db, param_hash)
+    if cached is not None:
+        return _json_safe(cached)
+
     raw = await anyio.to_thread.run_sync(
         lambda: _run_blocking(symbol=symbol, days=days, leverage=leverage,
                               horizon=horizon, rrs=rrs))
-    return _json_safe(_map_result(raw, symbol, rrs, leverage, horizon))
+    result = _json_safe(_map_result(raw, symbol, rrs, leverage, horizon))
+    cache_svc.save_cached_run(
+        db, param_hash, symbol, days, leverage, horizon, rrs, result
+    )
+    return result
+
+
+async def run_stream(
+    symbol, days, leverage, horizon, rrs, db: Session
+) -> AsyncGenerator[Dict, None]:
+    """Async generator that yields partial (per-RR) and final results.
+
+    Each yielded dict has shape:
+      {"type": "partial" | "complete", "data": <mapped ResearchResult>}
+    """
+    param_hash = cache_svc.compute_param_hash(symbol, days, leverage, horizon, rrs)
+    cached = cache_svc.get_cached_run(db, param_hash)
+    if cached is not None:
+        yield {"type": "complete", "data": _json_safe(cached)}
+        return
+
+    # Run the blocking streaming generator in a thread and consume it asynchronously.
+    loop = anyio.get_current_task()
+    # Use a thread + queue pattern to bridge sync generator -> async generator.
+    import queue
+    import threading
+
+    q: queue.Queue = queue.Queue()
+    done_sentinel = object()
+
+    def _producer():
+        try:
+            for chunk in _run_streaming_blocking(
+                symbol=symbol, days=days, leverage=leverage, horizon=horizon, rrs=rrs
+            ):
+                q.put(chunk)
+        except Exception as exc:
+            q.put(exc)
+        finally:
+            q.put(done_sentinel)
+
+    thread = threading.Thread(target=_producer, daemon=True)
+    thread.start()
+
+    final_result = None
+    while True:
+        chunk = await anyio.to_thread.run_sync(q.get)
+        if chunk is done_sentinel:
+            break
+        if isinstance(chunk, Exception):
+            raise chunk
+        mapped = _json_safe(_map_result(chunk, symbol, rrs, leverage, horizon))
+        final_result = mapped
+        if chunk.get("type") == "complete":
+            yield {"type": "complete", "data": mapped}
+        else:
+            yield {"type": "partial", "data": mapped}
+
+    if final_result is not None:
+        cache_svc.save_cached_run(
+            db, param_hash, symbol, days, leverage, horizon, rrs, final_result
+        )
 
 
 def _map_strategy(strat: Dict, rr: str, side: str) -> Dict:

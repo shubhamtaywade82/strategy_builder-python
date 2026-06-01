@@ -41,6 +41,20 @@ class ResearchSession(Base):
     updated_at: Mapped[int] = mapped_column(Integer, nullable=False, default=_now)
 
 
+class CachedResearchRun(Base):
+    __tablename__ = "cached_research_runs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    param_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True, index=True)
+    symbol: Mapped[str] = mapped_column(Text, nullable=False)
+    days: Mapped[int] = mapped_column(Integer, nullable=False)
+    leverage: Mapped[float] = mapped_column(Float, nullable=False)
+    horizon: Mapped[int] = mapped_column(Integer, nullable=False)
+    rrs: Mapped[str] = mapped_column(Text, nullable=False)
+    result_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False, default=_now)
+    updated_at: Mapped[int] = mapped_column(Integer, nullable=False, default=_now)
+
+
 class StrategyInsight(Base):
     __tablename__ = "strategy_insights"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

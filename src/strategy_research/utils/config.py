@@ -12,7 +12,7 @@ class DataConfig:
     request_delay: float = 0.12
     max_retries: int = 5
     backoff_base: float = 0.5
-    timeout: float = 10.0
+    timeout: float = 25.0
 
 
 @dataclass

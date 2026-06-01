@@ -1,19 +1,34 @@
+import { useState, useCallback } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { apiGet, apiPost } from "@/lib/api";
-import type { ResearchResult } from "@/types";
+import { apiGet, apiPost, apiPostStream } from "@/lib/api";
+import type { ResearchResult, ResearchStreamChunk } from "@/types";
 
 export interface RunResearchInput {
   symbol: string; days: number; leverage: number; horizon: number; rrs: string[];
 }
 
 export function useResearchRun(opts?: {
-  onSuccess?: (d: ResearchResult) => void; onError?: (e: Error) => void;
+  onSuccess?: (d: ResearchResult) => void;
+  onError?: (e: Error) => void;
+  onPartial?: (d: ResearchResult) => void;
 }) {
-  return useMutation<ResearchResult, Error, RunResearchInput>({
-    mutationFn: (input) => apiPost<ResearchResult>("/api/research/run", input),
-    onSuccess: opts?.onSuccess,
-    onError: opts?.onError,
-  });
+  const [isPending, setIsPending] = useState(false);
+
+  const mutate = useCallback((input: RunResearchInput) => {
+    setIsPending(true);
+    apiPostStream<ResearchStreamChunk>("/api/research/run-stream", input, (chunk) => {
+      opts?.onPartial?.(chunk.data);
+      if (chunk.type === "complete") {
+        opts?.onSuccess?.(chunk.data);
+        setIsPending(false);
+      }
+    }).catch((err) => {
+      opts?.onError?.(err);
+      setIsPending(false);
+    });
+  }, [opts?.onSuccess, opts?.onError, opts?.onPartial]);
+
+  return { mutate, isPending };
 }
 
 export function useAiHealth() {
