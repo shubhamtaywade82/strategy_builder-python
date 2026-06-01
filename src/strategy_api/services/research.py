@@ -94,6 +94,45 @@ def _camel_walk_forward(wf: Dict) -> Dict:
                         for f in wf.get("fold_results", [])]}
 
 
+def _map_player_side(side: Dict) -> Dict:
+    """Map one side of the real 5-condition rule backtest to camelCase."""
+    if not side or side.get("error"):
+        return {"error": (side or {}).get("error", "no data"),
+                "conditions": [{"id": c.get("id"), "label": c.get("label"),
+                                "feature": c.get("feature")} for c in (side or {}).get("conditions", [])],
+                "nSignals": (side or {}).get("n_signals", 0)}
+    m = side.get("metrics", {})
+    return {
+        "side": side.get("side"), "name": side.get("name", ""),
+        "nSignals": side.get("n_signals", 0),
+        "conditions": [{"id": c.get("id"), "label": c.get("label"), "feature": c.get("feature")}
+                       for c in side.get("conditions", [])],
+        "metrics": {
+            "tradeCount": m.get("trade_count", 0), "winRate": m.get("win_rate", 0),
+            "profitFactor": m.get("profit_factor"), "expectancy": m.get("expectancy", 0),
+            "avgWin": m.get("avg_win", 0), "avgLoss": m.get("avg_loss", 0),
+            "sharpe": m.get("sharpe", 0), "targetHitRate": m.get("target_hit_rate", 0),
+            "avgBarsHeld": m.get("avg_bars_held", 0), "pValue": m.get("p_value", 1.0)},
+        "baseline": side.get("baseline", {}),
+        "edgeWinRate": side.get("edge_win_rate", 0),
+        "edgeExpectancy": side.get("edge_expectancy", 0),
+        "folds": [{"fold": f.get("fold"), "trades": f.get("trades", 0),
+                   "expectancy": f.get("expectancy"), "winRate": f.get("win_rate"),
+                   "profitFactor": f.get("profit_factor")} for f in side.get("folds", [])],
+        "stability": side.get("stability", 0),
+        "isRobust": side.get("is_robust", False),
+        "warnings": side.get("warnings", []),
+        "exits": side.get("exits", {})}
+
+
+def _map_player(player: Dict) -> Dict:
+    if not player or player.get("error"):
+        return {"error": (player or {}).get("error", "no rule-strategy data")}
+    return {"rr": player.get("rr", ""),
+            "long": _map_player_side(player.get("long", {})),
+            "short": _map_player_side(player.get("short", {}))}
+
+
 def _map_result(raw: Dict, symbol: str, rrs: List[str], leverage: float,
                 horizon: int = 120) -> Dict:
     strategies, top_features = [], []
@@ -145,8 +184,9 @@ def _map_result(raw: Dict, symbol: str, rrs: List[str], leverage: float,
 
     primary = rrs[0] if rrs else "2:1"
     cfg = RR_CFGS.get(primary, {"upPct": 0.01, "dnPct": 0.005})
-    return {"symbol": symbol,
+    return {"symbol": symbol, "dataSource": raw.get("data_source", "binance"),
             "config": {"symbol": symbol, "rr": primary, "upPct": cfg["upPct"],
                        "dnPct": cfg["dnPct"], "leverage": leverage, "horizon": horizon, "side": "both"},
             "strategies": strategies, "walkForward": walk_forward,
-            "topFeatures": top_features, "labels": labels, "results": results_map}
+            "topFeatures": top_features, "labels": labels, "results": results_map,
+            "player": _map_player(raw.get("player", {}))}

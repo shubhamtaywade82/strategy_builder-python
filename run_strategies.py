@@ -26,6 +26,9 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from strategy_research._ui_engine.data_fetcher import fetch_symbol_mtf
 from strategy_research._ui_engine.backtest import backtest
+# Shared 5-condition SMC mask — single source of truth (also used by the UI
+# Strategy Player and trading_bot.py) so the rule can't drift between copies.
+from strategy_research._ui_engine.rule_strategy import build_signal_mask as _shared_mask, RuleConfig
 
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
 DAYS = 60
@@ -57,77 +60,22 @@ MIN_TRADES = 30
 
 
 # --------------------------------------------------------------------------
-# leakage-safe condition columns
+# leakage-safe condition columns (delegates to the shared rule module)
 # --------------------------------------------------------------------------
-def _htf_cond(frame: pd.DataFrame, cond_long: pd.Series, cond_short: pd.Series) -> pd.DataFrame:
-    """Wrap an HTF boolean condition keyed by close_time for backward merge."""
-    df = pd.DataFrame({"ref_time": frame["close_time"].reset_index(drop=True)})
-    df["c_long"] = cond_long.reset_index(drop=True).fillna(False).astype(bool)
-    df["c_short"] = cond_short.reset_index(drop=True).fillna(False).astype(bool)
-    return df.dropna(subset=["ref_time"]).sort_values("ref_time")
+_RULE_CFG = RuleConfig(
+    swing=SWING, fvg_lookback=FVG_LOOKBACK, atr_win=ATR_WIN, vol_win=VOL_WIN,
+    atr_q=ATR_Q, vol_q=VOL_Q, cooldown_bars=COOLDOWN_BARS,
+    n_folds=N_FOLDS, n_boot=N_BOOT, min_trades=MIN_TRADES, baseline_sample=BASELINE_SAMPLE,
+)
 
 
 def build_signal_mask(frames: dict) -> pd.DataFrame:
-    """Return 1m frame with per-bar long/short signal flags. No lookahead."""
-    d1 = frames["1m"].copy().reset_index(drop=True)
-    d1 = d1.sort_values("open_time").reset_index(drop=True)
-    out = d1[["open_time", "close_time", "open", "high", "low", "close", "volume"]].copy()
-    out["key"] = out["open_time"]
+    """Return 1m frame with per-bar long/short signal flags. No lookahead.
 
-    # --- C1: 4H EMA50 vs EMA200 (trend) ---
-    f4 = frames["4h"].sort_values("open_time")
-    e50 = f4["close"].ewm(span=50, adjust=False).mean()
-    e200 = f4["close"].ewm(span=200, adjust=False).mean()
-    c1 = _htf_cond(f4, e50 > e200, e50 < e200).rename(
-        columns={"c_long": "c1_long", "c_short": "c1_short"})
-
-    # --- C2: 1H Break of Structure (close breaks prior `SWING`-bar extreme) ---
-    f1h = frames["1h"].sort_values("open_time")
-    prev_high = f1h["high"].rolling(SWING).max().shift(1)
-    prev_low = f1h["low"].rolling(SWING).min().shift(1)
-    c2 = _htf_cond(f1h, f1h["close"] > prev_high, f1h["close"] < prev_low).rename(
-        columns={"c_long": "c2_long", "c_short": "c2_short"})
-
-    # --- C3: 15m FVG present within last FVG_LOOKBACK bars ---
-    f15 = frames["15m"].sort_values("open_time")
-    bull_fvg = (f15["low"] > f15["high"].shift(2))
-    bear_fvg = (f15["high"] < f15["low"].shift(2))
-    c3_long = bull_fvg.rolling(FVG_LOOKBACK, min_periods=1).max().fillna(0).astype(bool)
-    c3_short = bear_fvg.rolling(FVG_LOOKBACK, min_periods=1).max().fillna(0).astype(bool)
-    c3 = _htf_cond(f15, c3_long, c3_short).rename(
-        columns={"c_long": "c3_long", "c_short": "c3_short"})
-
-    # backward merges (HTF bar only influences 1m bars after its close)
-    for blk in (c1, c2, c3):
-        out = pd.merge_asof(
-            out.sort_values("key"), blk,
-            left_on="key", right_on="ref_time",
-            direction="backward", allow_exact_matches=True,
-        ).drop(columns=["ref_time"], errors="ignore")
-
-    # --- C4: 1m ATR(14) percentile (trailing window, strictly past) ---
-    c = out["close"]
-    tr = pd.concat([
-        out["high"] - out["low"],
-        (out["high"] - c.shift()).abs(),
-        (out["low"] - c.shift()).abs(),
-    ], axis=1).max(axis=1)
-    atr = tr.rolling(14).mean()
-    atr_thresh = atr.rolling(ATR_WIN, min_periods=ATR_WIN // 4).quantile(ATR_Q).shift(1)
-    out["c4"] = (atr > atr_thresh)
-
-    # --- C5: 1m volume percentile (trailing window, strictly past) ---
-    v = out["volume"]
-    vol_thresh = v.rolling(VOL_WIN, min_periods=VOL_WIN // 4).quantile(VOL_Q).shift(1)
-    out["c5"] = (v > vol_thresh)
-
-    for col in ["c1_long", "c1_short", "c2_long", "c2_short",
-                "c3_long", "c3_short", "c4", "c5"]:
-        out[col] = out[col].fillna(False).astype(bool)
-
-    out["sig_long"] = out["c1_long"] & out["c2_long"] & out["c3_long"] & out["c4"] & out["c5"]
-    out["sig_short"] = out["c1_short"] & out["c2_short"] & out["c3_short"] & out["c4"] & out["c5"]
-    return out.reset_index(drop=True)
+    Thin wrapper around the shared engine mask so this multi-symbol runner and
+    the dashboard's Strategy Player evaluate byte-identical conditions.
+    """
+    return _shared_mask(frames, _RULE_CFG)
 
 
 # --------------------------------------------------------------------------
