@@ -11,7 +11,7 @@ from typing import Dict, List
 from .features import build_mtf_features
 from .labels import BarrierCfg, label_both_sides
 from .backtest import backtest
-from .validation import walk_forward, shuffle_test, oos_predict, SEED, _XGB_KW
+from .validation import walk_forward, shuffle_test, oos_predict, _XGB_KW
 from .robustness import score_robustness
 
 
