@@ -7,7 +7,6 @@ import {
   Sparkles,
   Loader,
   Trash2,
-  Cpu,
   AlertCircle,
   ChevronDown,
   Zap,

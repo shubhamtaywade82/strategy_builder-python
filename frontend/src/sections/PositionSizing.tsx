@@ -6,14 +6,24 @@ interface Props {
 }
 
 export default function PositionSizing({ results }: Props) {
+  // Seed Kelly inputs from the REAL backtested long rule when available, instead
+  // of hardcoded report numbers. Falls back to neutral defaults pre-run.
+  const realLong = results?.player?.long?.metrics;
+  const dnPct = results?.config?.dnPct;
+  const round = (v: number, d = 2) => +v.toFixed(d);
+
   const [accountSize, setAccountSize] = useState(10000);
   const [riskPct, setRiskPct] = useState(2);
   const [entryPrice, setEntryPrice] = useState(150);
-  const [stopPrice, setStopPrice] = useState(149.25);
-  const [leverage, setLeverage] = useState(10);
-  const [winRate, setWinRate] = useState(57.6);
-  const [avgWin, setAvgWin] = useState(0.95);
-  const [avgLoss, setAvgLoss] = useState(0.59);
+  const [stopPrice, setStopPrice] = useState(
+    dnPct ? round(150 * (1 - dnPct), 2) : 149.25);
+  const [leverage, setLeverage] = useState(results?.config?.leverage ?? 10);
+  const [winRate, setWinRate] = useState(
+    realLong ? round(realLong.winRate * 100, 1) : 50);
+  const [avgWin, setAvgWin] = useState(
+    realLong?.avgWin ? round(realLong.avgWin * 100) : 0.95);
+  const [avgLoss, setAvgLoss] = useState(
+    realLong?.avgLoss ? round(realLong.avgLoss * 100) : 0.55);
 
   const priceRisk = Math.abs(entryPrice - stopPrice) / entryPrice;
   const riskAmount = accountSize * (riskPct / 100);
@@ -32,9 +42,6 @@ export default function PositionSizing({ results }: Props) {
   // Expectancy over 100 trades
   const nTrades = 100;
   const expectedReturn = nTrades * edge * (accountSize / 100) * leverage;
-
-  // Risk of ruin (simplified)
-  const riskOfRuin = Math.pow((1 - w) / (1 - (w * r / (1 + r))), nTrades / 10) * 100;
 
   return (
     <div className="space-y-4">

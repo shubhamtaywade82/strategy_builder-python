@@ -85,8 +85,60 @@ export interface FeatureInsight {
   shapValue: number;
 }
 
+export interface PlayerCondition {
+  id: string;
+  label: string;
+  feature: string;
+}
+
+export interface PlayerFold {
+  fold: number;
+  trades: number;
+  expectancy: number | null;
+  winRate: number | null;
+  profitFactor: number | null;
+}
+
+export interface PlayerMetrics {
+  tradeCount: number;
+  winRate: number;
+  profitFactor: number | null;
+  expectancy: number;
+  avgWin: number;
+  avgLoss: number;
+  sharpe: number;
+  targetHitRate: number;
+  avgBarsHeld: number;
+  pValue: number;
+}
+
+export interface PlayerSide {
+  side?: string;
+  name?: string;
+  nSignals: number;
+  conditions: PlayerCondition[];
+  metrics?: PlayerMetrics;
+  baseline?: { winRate?: number; expectancy?: number };
+  edgeWinRate?: number;
+  edgeExpectancy?: number;
+  folds?: PlayerFold[];
+  stability?: number;
+  isRobust?: boolean;
+  warnings?: string[];
+  exits?: { targetPct?: number; stopPct?: number; timeStopBars?: number };
+  error?: string;
+}
+
+export interface PlayerPayload {
+  rr?: string;
+  long?: PlayerSide;
+  short?: PlayerSide;
+  error?: string;
+}
+
 export interface ResearchResult {
   symbol: string;
+  dataSource?: 'binance' | 'synthetic';
   config: StrategyConfig;
   strategies: StrategyRule[];
   walkForward: WalkForwardSummary;
@@ -97,6 +149,7 @@ export interface ResearchResult {
     noTrade: number;
     total: number;
   };
+  player?: PlayerPayload;
 }
 
 export type RRRatio = '3:1' | '2:1' | '1:1' | '1:2' | '1:3';
