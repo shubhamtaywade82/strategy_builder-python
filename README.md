@@ -19,6 +19,33 @@ Single Python backend + single React frontend:
 - **`src/strategy_builder/`** — full manual/AI engine + CLI (unchanged).
 - **`frontend/`** — React + Vite dashboard. Data layer is plain REST + React Query (`src/lib/api.ts`, `src/hooks/api/`).
 
+## Honest, deterministic research
+
+This engine is built to **not** flatter itself:
+
+- **Out-of-sample, not in-sample.** Model-confidence strategies are backtested on
+  purged walk-forward *out-of-sample* predictions (`validation.oos_predict`), never
+  the in-sample fit. A model that memorises the training set scores >90% in-sample
+  and ~30–50% out-of-sample — only the OOS number is reported as performance.
+- **Robustness gate.** `robustness.score_robustness` marks a strategy viable only
+  when it is profitable OOS, consistent across folds, significant (shuffle p<0.05),
+  and has enough trades. In-sample expectancy ranks nothing. The 5-condition rule
+  (`rule_strategy.py`) is additionally checked against a random-entry baseline and a
+  bootstrap p-value. One shared `build_signal_mask` powers the backtest, the
+  dashboard's Strategy Player, and the live bot, so they can't drift.
+- **Deterministic.** Single seed + single-threaded XGBoost ⇒ identical inputs
+  produce byte-identical AUCs/p-values/metrics.
+- **Never silently faked.** Every result carries `data_source` (`binance` or
+  `synthetic`). When live klines are unavailable, set
+  `STRATEGY_RESEARCH_ALLOW_SYNTHETIC=1` to run on the deterministic offline
+  generator — clearly badged in the UI/report, never passed off as real.
+
+Regenerate the analysis report straight from a real run (no hand-typed numbers):
+
+```bash
+venv/bin/python generate_report.py SOLUSDT 60 2:1   # -> docs/strategy_analysis_report/
+```
+
 ## Web Dashboard
 
 **Dev (two processes):**
